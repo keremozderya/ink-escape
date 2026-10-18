@@ -16,6 +16,7 @@ class InkGame extends FlameGame {
   double cameraX = -96, visualTime = 0, deadAge = 0, _uiTime = 0;
   double _origin = 0;
   double? _gateAt;
+  double? _landAt;
   final Map<String, double> _lineBorn = {};
   final List<InkPickupFlight> _flights = [];
   final List<InkParticle> particles = [];
@@ -49,6 +50,7 @@ class InkGame extends FlameGame {
     _origin = session.origin;
     _shownIndex = -1;
     _gateAt = null;
+    _landAt = null;
     _lineBorn.clear();
     _flights.clear();
     visualTime = 0;
@@ -71,6 +73,9 @@ class InkGame extends FlameGame {
     onEffect?.call(name);
     if (name == 'death') {
       deadAge = 0;
+    }
+    if (name == 'land') {
+      _landAt = visualTime;
     }
     if (name == 'commit' && session.lines.isNotEmpty) {
       _lineBorn[session.lines.last.id] = visualTime;
@@ -119,7 +124,11 @@ class InkGame extends FlameGame {
     if (session.phase == Phase.playing) {
       session.advance(step);
       visualTime += step;
-      cameraX += (session.x - 96 - cameraX) * (1 - math.exp(-10 * step));
+      // Keep the paper fixed beneath a held pointer. Tracking Dot while drawing
+      // changes the world position of a stationary finger and bends the path.
+      if (!session.strokePointerActive) {
+        cameraX += (session.x - 96 - cameraX) * (1 - math.exp(-10 * step));
+      }
       for (final p in particles) {
         p.age += step;
         p.p = p.p + p.velocity * step;
@@ -588,7 +597,9 @@ class InkGame extends FlameGame {
 
   void _dot(Canvas c) {
     final q = point(V(session.x, session.y));
-    final walking = session.phase == Phase.playing && session.grounded;
+    // Pausing freezes the last gait instead of snapping both feet to idle.
+    final walking =
+        session.phase != Phase.ready && session.walked > 0 && session.grounded;
     var floorSlope = 0.0;
     if (session.grounded) {
       for (final surface in session.level.terrain) {
@@ -609,6 +620,13 @@ class InkGame extends FlameGame {
       grounded: session.grounded,
       walking: walking,
       time: visualTime,
+      verticalSpeed: session.vy,
+      landing: _landAt == null
+          ? 0
+          : math.sin(
+                  math.pi * ((visualTime - _landAt!) / .22).clamp(0.0, 1.0),
+                ) *
+                .8,
     );
     final dead = session.phase == Phase.dead;
     final death = Curves.easeInOutCubic.transform(
@@ -632,7 +650,7 @@ class InkGame extends FlameGame {
       c.scale(1 + death * .5, 1 - death * .86);
     }
     void foot(InkFootPose p, double hip, bool front) {
-      final x = p.x + hip * .18;
+      final x = p.x / math.sqrt(1 + floorSlope * floorSlope) + hip * .18;
       final y = -p.lift - x * floorSlope;
       final path = Path()
         ..moveTo(hip, -9 - pose.rise * .45)
@@ -668,14 +686,59 @@ class InkGame extends FlameGame {
     c.translate(0, -pose.rise);
     c.rotate(pose.lean);
     c.scale(pose.width, pose.height);
-    // Keep one detailed body identity and animate the feet separately; no pose popping.
-    c.clipRect(const Rect.fromLTRB(-35, -60, 35, -7));
+    void arm(bool front) {
+      final swing = walking ? math.sin(session.walked / 28 * math.pi * 2) : 0.0;
+      final sign = front ? 1.0 : -1.0;
+      final hip = Offset(sign * 11, -18);
+      final hand = Offset(
+        sign * 15.5 - swing * sign * 3,
+        -12 - (session.grounded ? 0 : 4) - math.max(0, swing * sign) * 2,
+      );
+      final armPath = Path()
+        ..moveTo(hip.dx, hip.dy)
+        ..quadraticBezierTo(sign * 16, -17, hand.dx, hand.dy);
+      c.drawPath(
+        armPath,
+        Paint()
+          ..color = front ? const Color(0xff242321) : const Color(0xff35312c)
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = 4.2,
+      );
+      c.drawCircle(hand, 2.3, Paint()..color = const Color(0xff262421));
+      c.drawPath(
+        armPath,
+        Paint()
+          ..color = const Color(0x756c665d)
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round
+          ..strokeWidth = .65,
+      );
+    }
+
+    arm(false);
+    c.save();
+    // Isolate the detailed torso and curl. The old horizontal crop left
+    // pieces of baked-in legs/arms visible above the separately animated ones.
+    final torso = Path()
+      ..moveTo(-11, -27)
+      ..cubicTo(-15, -22, -15, -14, -10, -9)
+      ..cubicTo(-5, -4.8, 4, -5, 10, -10)
+      ..cubicTo(16, -15, 16, -23, 11, -28)
+      ..cubicTo(8, -32, 1, -34, -5, -34)
+      ..lineTo(-5, -43)
+      ..lineTo(-16, -43)
+      ..lineTo(-16, -30)
+      ..close();
+    c.clipPath(torso);
     c.drawImageRect(
       dot,
       src,
       const Rect.fromLTWH(-27, -47.52, 54, 54),
       Paint()..filterQuality = FilterQuality.medium,
     );
+    c.restore();
+    arm(true);
     c.restore();
     foot(pose.front, 5, true);
     c.restore();

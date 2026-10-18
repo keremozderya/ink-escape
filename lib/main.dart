@@ -284,6 +284,9 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                             if (_pointer == null && game.sceneReady) {
                               if (s.beginStroke(
                                 game.worldPoint(e.localPosition),
+                                snapRadius: (28 / game.scale)
+                                    .clamp(20.0, 44.0)
+                                    .toDouble(),
                               )) {
                                 _pointer = e.pointer;
                               }
@@ -349,7 +352,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                           right: 24 * factor,
                           top: 650 * factor,
                           child: _instruction(
-                            'İki sabit kâğıt kenarını birleştir.\nParmağını kaldırınca yolun gerçek olur.',
+                            'İşaretli kenardan diğerine doğru çiz.\nParmağını kaldırınca köprü hazır.',
                             factor,
                           ),
                         ),

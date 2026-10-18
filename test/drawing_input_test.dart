@@ -58,9 +58,13 @@ void main() {
         final origin = tester.getTopLeft(
           find.byKey(const ValueKey('ink-drawing-surface')),
         );
-        Offset point(V p) => origin + state.game.point(p) * state.game.scale;
+        // A real finger follows screen coordinates; do not compensate for a
+        // moving camera at every event (that hid drift in the previous test).
+        final cameraAtDown = state.game.cameraX;
+        Offset point(V p) =>
+            origin + Offset(p.x - cameraAtDown, 588 - p.y) * state.game.scale;
         final pen = await tester.startGesture(
-          point(const V(320, 0)),
+          point(const V(320, -25)),
           kind: config.$3,
         );
         expect(s.draft, isNotNull);
@@ -69,10 +73,13 @@ void main() {
           final t = i / 30;
           final wobble = i == 30 ? 0.0 : (i.isOdd ? 1.5 : -1.5);
           await pen.moveTo(
-            point(V(320 + 72 * t, 5 * 4 * t * (1 - t) + wobble)),
+            point(V(320 + 72 * t, 5 * 4 * t * (1 - t) + wobble - 25)),
           );
-          await tester.pump(const Duration(milliseconds: 12));
+          await tester.pump(const Duration(milliseconds: 45));
         }
+        // Holding the finger still must not move the paper underneath it.
+        await tester.pump(const Duration(milliseconds: 250));
+        expect(state.game.cameraX, cameraAtDown);
         expect(s.lines, isEmpty);
         expect(s.ink, greaterThanOrEqualTo(before));
         await pen.up();

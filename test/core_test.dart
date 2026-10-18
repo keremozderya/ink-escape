@@ -139,6 +139,21 @@ void main() {
     expect(draw(s, [const V(100, 0), const V(100, 80)]), isFalse);
     expect(s.ink, 180);
   });
+  test('Brief finger backtracking is tolerated without erasing a bridge', () {
+    final s = game();
+    s.beginStroke(const V(320, 0));
+    s.moveStroke(const V(350, 0));
+    s.moveStroke(const V(346, .5));
+    s.moveStroke(const V(370, 1));
+    s.moveStroke(const V(392, 0));
+    expect(s.endStroke(), isTrue, reason: s.message);
+    expect(s.lines.single.points.last.toJson(), [392.0, 0.0]);
+    s.x = 318;
+    s.advance(2.5);
+    expect(s.grounded, isTrue);
+    expect(s.onNatural, isTrue);
+    expect(s.x, greaterThan(392));
+  });
   test(
     'Two slots never evict the bridge under Dot; retirement waits for full body',
     () {

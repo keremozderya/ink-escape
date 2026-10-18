@@ -2,7 +2,7 @@
 from pathlib import Path
 import zipfile
 root=Path(__file__).resolve().parents[1]
-out=root.parent/'ink_escape_flutter_v0_2.zip'
+out=root.parent/'ink_escape_flutter_v0_3.zip'
 roots=['lib','assets','android','ios','test','scripts','docs','.vscode']
 files=['pubspec.yaml','pubspec.lock','analysis_options.yaml','README.md','.gitignore','.metadata']
 exclude={'.git','.dart_tool','.idea','build','dist','.gradle','Pods','.symlinks','__pycache__','ephemeral'}

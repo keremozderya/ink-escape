@@ -71,7 +71,7 @@ void main() {
     });
   }
   final report = {
-    'prototype': '0.2',
+    'prototype': '0.3',
     'date': '2026-10-18',
     'gesture_real_seconds': 1,
     'step_seconds': 1 / 120,
