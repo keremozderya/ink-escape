@@ -1,0 +1,23 @@
+# Flutter / local build state
+.dart_tool/
+.flutter-plugins*
+.packages
+build/
+dist/
+coverage/
+.pub-cache/
+.pub/
+.idea/
+*.iml
+.DS_Store
+android/local.properties
+android/key.properties
+android/.gradle/
+android/captures/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+*.log
+*.jks
+*.keystore

@@ -1,0 +1,9 @@
+{
+  "version":"0.2.0",
+  "configurations":[
+    {"name":"Ink Escape","request":"launch","type":"dart","program":"lib/main.dart"},
+    {"name":"Lab: Çatı","request":"launch","type":"dart","program":"lib/main.dart","toolArgs":["--dart-define=INK_LAB=roof"]},
+    {"name":"Lab: Bilye","request":"launch","type":"dart","program":"lib/main.dart","toolArgs":["--dart-define=INK_LAB=ball"]},
+    {"name":"Lab: İki çizgi","request":"launch","type":"dart","program":"lib/main.dart","toolArgs":["--dart-define=INK_LAB=two"]}
+  ]
+}
