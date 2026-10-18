@@ -1,6 +1,6 @@
 # Ink Escape · Flutter + Flame
 
-Android ve iOS için doğrudan açılıp çalıştırılabilen Flutter projesi. Sürüm **0.2.0+2**, 18 Ekim 2026.
+Android ve iOS için doğrudan açılıp çalıştırılabilen Flutter projesi. Sürüm **0.3.0+3**, 18 Ekim 2026.
 
 ## Bilgisayarında çalıştır
 
@@ -14,7 +14,7 @@ flutter run
 
 Birden fazla cihaz varsa `flutter run -d CIHAZ_ID` kullan. Android telefonunda geliştirici seçenekleri ve USB hata ayıklama açık olmalı. İlk Gradle derlemesi internet bağlantısıyla bağımlılık indirir.
 
-Doğrulanan SDK: Flutter **3.47.5**, Dart **3.13.4**. Projenin asgari bağımlılık gereksinimi Flutter 3.41 / Dart 3.11; kilit dosyası pakete dahildir. Native cihaz derlemesi ve fiziksel cihaz testi bu ortamda yapılmadı; Android SDK bulunmuyor. iOS çalıştırma/derleme için macOS ve Xcode gerekir.
+Doğrulanan SDK: Flutter **3.47.5**, Dart **3.13.4**. Projenin asgari bağımlılık gereksinimi Flutter 3.41 / Dart 3.11; kilit dosyası pakete dahildir. Fiziksel cihaz testi yapılmadı. iOS çalıştırma/derleme için macOS ve Xcode gerekir.
 
 ```powershell
 flutter test
@@ -22,7 +22,7 @@ flutter analyze
 flutter build apk --debug
 ```
 
-APK komutunun yerel çıktı yolu: `build/app/outputs/flutter-apk/app-debug.apk`. Teslimde önceden derlenmiş APK/IPA yoktur.
+APK komutunun yerel çıktı yolu: `build/app/outputs/flutter-apk/app-debug.apk`. IPA üretilmedi.
 
 ## GitHub'a push — Windows PowerShell
 
@@ -53,6 +53,15 @@ git push -u origin main
 Git ad/e-posta ayarı isterse kendi bilgilerini kullan: `git config --global user.name "ADIN"` ve `git config --global user.email "EPOSTAN"`.
 
 ## Bu sürümdeki düzeltmeler
+
+- Çizim sırasında kamera sabit kalır; kâğıt parmağın altından kaymaz. Bırakınca kamera yumuşak biçimde Dot'u takip eder.
+- Çizime başlama alanı ekran ölçeğine göre 28 mantıksal pikseldir (dünya sınırı 20–44 birim). Kenara yakın dokunuşta parmak ile kenar arasındaki fark korunur; çizimin iki ucundaki yapışma düzeltmesi eğri boyunca dağıtılır. Parmak bırakılırken filtrelenmiş ucun yerine gerçek bırakma noktası kullanılır.
+- 8 birime kadar kısa geri titreme çizgiyi iptal etmez. Kasıtlı geri dönüş, fazla diklik/uzunluk, mürekkep ve iki çizgi sınırı korunur.
+- Yürüyüşte ayak temas hızı süreklidir; yere basılı ayak zeminde kaymaz. Kollar adımla birlikte salınır; gövde esner, düşüş ve iniş ayrı pozlarla gösterilir. Eski görseldeki sabit kol/bacak parçaları gövde maskesinden çıkarıldı. Duraklatma yürüyüş pozunu da dondurur.
+- Ayak ve iniş seslerindeki tiz sinüs cıvıltıları kaldırıldı. Daha kısa, koyu frekanslı sıkışma ve yapışarak ayrılma dokuları kullanılıyor. Adım ve kalem sesleri kısıldı. Efektler kapalıyken de ölüm/bitişte müzik durur.
+- Dokunma testi artık hareket eden kameraya göre parmağını yeniden konumlandırmaz; ekranda sabit hareketlerle ve kenarın altında başlayan sürüklemeyle çalışır.
+
+### Önceki sürümün temeli
 
 - Küçük el titremeleri kısa segmentlerde fazla dik algılanıp bütün çizgiyi reddedebiliyordu. Çizgi artık eşit aralıklarla örneklenip dar bir toleransla yumuşatılıyor; kasıtlı kemer yoğun noktalarıyla korunuyor. Gerçek diklik, uzunluk, iki sabit uç ve Ink kuralları devam ediyor.
 - Çizim fare ve dokunma olaylarıyla gerçek Flutter arayüzünden test ediliyor; yalnızca çekirdeğe doğrudan çizgi gönderen testlerle yetinilmiyor.

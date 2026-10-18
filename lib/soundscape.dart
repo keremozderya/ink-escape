@@ -56,7 +56,7 @@ class Soundscape {
       await _music!.setVolume(.32);
       await _music!.setSource(AssetSource('paper_evening.mp3'));
       await _pencil!.setReleaseMode(ReleaseMode.loop);
-      await _pencil!.setVolume(.5);
+      await _pencil!.setVolume(.22);
       await _pencil!.setSource(AssetSource('pencil.wav'));
       for (final s in effects) {
         if (_disposed) {
@@ -145,6 +145,13 @@ class Soundscape {
     if (name == 'start') {
       resume();
     }
+    // Music lifecycle must also work when sound effects are disabled.
+    if (name == 'death' || name == 'complete') {
+      _playing = false;
+      if (_ready) {
+        _safe(_music!.pause());
+      }
+    }
     if (!_ready || !effectsOn) {
       return;
     }
@@ -164,18 +171,14 @@ class Soundscape {
       _safe(
         pool.start(
           volume: name.startsWith('step')
-              ? .48
+              ? .32
               : name == 'crumb'
-              ? .35
-              : .72,
+              ? .20
+              : name == 'land'
+              ? .48
+              : .55,
         ),
       );
-    }
-    if (name == 'death' || name == 'complete') {
-      _playing = false;
-      if (_ready) {
-        _safe(_music!.pause());
-      }
     }
   }
 

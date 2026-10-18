@@ -19,26 +19,26 @@ def band(rng,n,lo,hi):
 def envelope(t,start,rise,decay):
     q=np.maximum(t-start,0)
     return (t>=start)*(1-np.exp(-q/rise))*np.exp(-q/decay)
-def ink(seed,duration=.28,weight=1):
+def ink(seed,duration=.23,weight=1):
     r=np.random.default_rng(seed);n=int(SR*duration);t=np.arange(n)/SR
-    # Soft, thick compression, then wet adhesion/release: two distinct textures.
-    low=band(r,n,100,760);mid=band(r,n,500,2700);air=band(r,n,1700,5200)
-    impact=envelope(t,.007,.002,.028)
-    squeeze=envelope(t,.022,.012,.065)
-    release=envelope(t,.095+r.uniform(-.012,.012),.004,.035)
-    a=.63*low*impact+.35*mid*squeeze+.19*air*release+.45*low*release
-    # Small damped bubbles with random size/lifetime, not a musical note.
-    for j in range(r.integers(8,14)):
-        start=r.uniform(.018,.19);life=r.uniform(.009,.028);tt=np.maximum(t-start,0)
-        f=r.uniform(450,1550)/weight
-        phase=2*np.pi*(f*tt-f*.55*tt*tt/life)
-        bubble=np.sin(phase)*(tt>0)*(1-np.exp(-tt/.0012))*np.exp(-tt/life)
-        a+=r.uniform(.018,.06)*bubble
-    # Tiny dispersed droplets make the tail organic, keeping harsh highs quiet.
+    # Broad, damped noise bands only: the previous many sine chirps sounded
+    # like squeaks. A low compression and short adhesive pull read as liquid.
+    low=band(r,n,85,420);wet=band(r,n,280,1250)
+    soft=band(r,n,650,2100)
+    press=envelope(t,.002,.009,.028)
+    squeeze=envelope(t,.014,.016,.045)
+    release_at=r.uniform(.068,.092)*weight
+    release=envelope(t,release_at,.007,.024)
+    a=1.1*low*press+.65*wet*squeeze+.55*low*release+.14*soft*release
+    # Irregular noise grains replace pitched "bubbles". Keep the texture
+    # sparse, dark, short, and dry enough for a phone speaker at walking pace.
     for _ in range(3):
-        start=r.uniform(.07,.17);a+=.12*mid*envelope(t,start,.0015,.009)
-    a=sosfilt(butter(2,4700,fs=SR,output='sos'),a)
-    return a/(np.max(np.abs(a))+1e-9)*r.uniform(.70,.82)
+        start=r.uniform(.025,.125)
+        a+=r.uniform(.15,.24)*wet*envelope(t,start,.003,r.uniform(.006,.012))
+    a=sosfilt(butter(2,2400,fs=SR,output='sos'),a)
+    a-=a.mean()
+    a*=.11/(np.sqrt(np.mean(a*a))+1e-9)
+    return a
 steps=[]
 for i in range(6):steps.append(save('step'+str(i),ink(88231+i*173,weight=1+(i%2)*.08)))
 save('land',ink(1239,.34,1.25)*1.05)

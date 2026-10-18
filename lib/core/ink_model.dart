@@ -225,10 +225,13 @@ class InkLine {
 }
 
 class Draft {
-  Draft(this.start, this.points) : rawPoint = points.last;
+  Draft(this.start, this.points, {this.snapRadius = 20})
+    : rawPoint = points.last;
   final Anchor start;
   final List<V> points;
   V rawPoint;
+  final double snapRadius;
+  V pointerOffset = const V(0, 0);
   bool backwards = false;
   V? get end => points.isEmpty ? null : points.last;
 }
@@ -432,9 +435,9 @@ class InkSession {
     emit('invalid');
   }
 
-  Anchor? anchorAt(V p) {
+  Anchor? anchorAt(V p, {double radius = 20}) {
     Anchor? best;
-    var distance = 20.0;
+    var distance = radius;
     for (final s in [...level.terrain, ...level.anchors]) {
       if (s.id == 'previous-tail') {
         continue;
@@ -448,11 +451,13 @@ class InkSession {
     return best;
   }
 
-  bool beginStroke(V p) {
+  bool beginStroke(V p, {double snapRadius = 20}) {
     if (phase == Phase.resumeStroke) {
-      if (draft?.end != null && p.distance(draft!.end!) <= 26) {
+      if (draft?.end != null &&
+          p.distance(draft!.end!) <= math.max(26, snapRadius)) {
         phase = Phase.playing;
         strokePointerActive = true;
+        draft!.pointerOffset = draft!.end! - p;
         return true;
       }
       return false;
@@ -464,28 +469,32 @@ class InkSession {
       hint('İki çizgi hâlâ görevde.');
       return false;
     }
-    final a = anchorAt(p);
+    final a = anchorAt(p, radius: snapRadius);
     if (a == null) {
       hint('Sabit bir kâğıt kenarından başla.');
       return false;
     }
-    draft = Draft(a, [a.point]);
+    draft = Draft(a, [a.point], snapRadius: snapRadius)
+      ..pointerOffset = a.point - p;
     strokePointerActive = true;
     emit('penStart', a.point);
     return true;
   }
 
-  void moveStroke(V p) {
+  void moveStroke(V input) {
     if (phase != Phase.playing || !strokePointerActive || draft == null) {
       return;
     }
     final d = draft!;
+    final p = input + d.pointerOffset;
     final last = d.points.last;
     if (p.distance(d.rawPoint) < .8) {
       return;
     }
     // Sub-pixel hand wobble is removed; intentional contours remain intact.
-    if (p.x < d.rawPoint.x - 2.4) {
+    // Compare with the furthest sample so a deliberate reversal still fails,
+    // while brief touch jitter (including on finger-up) does not poison a path.
+    if (p.x < last.x - 8) {
       d.backwards = true;
     }
     d.rawPoint = p;
@@ -503,15 +512,31 @@ class InkSession {
     if (d == null || d.points.length < 2) {
       return (null, 'İki sabit yüzeyi birleştir.');
     }
-    final end = anchorAt(d.points.last);
+    // The filter trails behind fast drags. Anchor the actual release position,
+    // not the filtered preview; otherwise a valid short flick misses its edge.
+    final end = anchorAt(d.rawPoint, radius: d.snapRadius);
     if (end == null) {
       return (null, 'Diğer ucu da sabit kâğıda bırak.');
     }
     if (d.backwards) {
       return (null, 'Çizgi soldan sağa ilerlemeli.');
     }
-    final raw = List<V>.of(d.points)..[0] = d.start.point;
-    raw[raw.length - 1] = end.point;
+    final raw = <V>[d.start.point];
+    final span = end.point.x - d.start.point.x;
+    if (span < 12) {
+      return (null, 'İki ayrı kenarı birleştir.');
+    }
+    // Fit endpoint snap corrections across the stroke, rather than adding a
+    // near-vertical final segment. A finger drawn just below the edge should
+    // produce the same bridge as the equivalent gesture directly on it.
+    final endCorrection = end.point.y - d.rawPoint.y;
+    raw.addAll(
+      d.points.skip(1).where((p) => p.x < end.point.x - .4).map((p) {
+        final t = ((p.x - d.start.point.x) / span).clamp(0.0, 1.0);
+        return V(p.x, p.y + endCorrection * t);
+      }),
+    );
+    raw.add(end.point);
     final p = smoothStroke(raw);
     if (end.point.x - p.first.x < 12) {
       return (null, 'İki ayrı kenarı birleştir.');
@@ -552,7 +577,7 @@ class InkSession {
     }
     var role = 'walk';
     final a = draft!.start.surface;
-    final b = anchorAt(p.last)!.surface;
+    final b = anchorAt(p.last, radius: draft!.snapRadius)!.surface;
     if (a.tag == b.tag && a.tag != 'ground') {
       role = a.tag;
     }
@@ -985,6 +1010,7 @@ class InkSession {
             'points': draft!.points.map((p) => p.toJson()).toList(),
             'backwards': draft!.backwards,
             'rawPoint': draft!.rawPoint.toJson(),
+            'snapRadius': draft!.snapRadius,
           },
   };
   static InkSession restore(
@@ -1058,6 +1084,7 @@ class InkSession {
             Draft(
                 Anchor(V.from(a['start']), surface),
                 (a['points'] as List).map(V.from).toList(),
+                snapRadius: (a['snapRadius'] as num?)?.toDouble() ?? 20,
               )
               ..backwards = a['backwards'] == true
               ..rawPoint = a['rawPoint'] == null

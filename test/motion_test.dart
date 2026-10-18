@@ -2,6 +2,30 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ink_escape/presentation/ink_motion.dart';
 
 void main() {
+  test('Ground contact has continuous velocity and no foot slide', () {
+    InkWalkPose pose(double d) =>
+        InkWalkPose.sample(d, grounded: true, walking: true);
+    for (final contact in [0.0, 14.0, 28.0]) {
+      const e = .0001;
+      final a = pose(contact + 28 - e);
+      final b = pose(contact + 28);
+      final c = pose(contact + 28 + e);
+      expect(
+        (b.front.x - a.front.x) / e,
+        closeTo((c.front.x - b.front.x) / e, .002),
+      );
+      expect(
+        (b.back.lift - a.back.lift) / e,
+        closeTo((c.back.lift - b.back.lift) / e, .002),
+      );
+    }
+    for (var d = 1.0; d < 12; d += .5) {
+      expect(
+        (pose(d).back.x + d) - (pose(d + .1).back.x + d + .1),
+        closeTo(0, 1e-6),
+      );
+    }
+  });
   test('Walk pose stays continuous across both contacts and loop boundary', () {
     for (final d in [0.0, 14.0, 28.0, 42.0]) {
       final a = InkWalkPose.sample(
