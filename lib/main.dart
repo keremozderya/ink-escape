@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'core/ink_model.dart';
 import 'core/save_journal.dart';
 import 'ink_game.dart';
 import 'soundscape.dart';
+import 'presentation/opening_story.dart';
 
 const paper = Color(0xfff6f1e6),
     inkColor = Color(0xff38312a),
@@ -21,11 +24,9 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
-  final raw =
-      jsonDecode(
-            await rootBundle.loadString('assets/data/prototype_levels.json'),
-          )
-          as Map<String, dynamic>;
+  final raw = jsonDecode(
+    await rootBundle.loadString('assets/data/prototype_levels.json'),
+  ) as Map<String, dynamic>;
   const configuredLab = String.fromEnvironment('INK_LAB');
   final test = configuredLab.isEmpty ? null : configuredLab;
   final lab = raw['labs'][test];
@@ -70,7 +71,9 @@ Future<void> main() async {
       store: store,
       sound: sound,
       restored: saved != null,
-      camera: (saved?['cameraX'] as num?)?.toDouble(),
+      camera: session.migratedLayout
+          ? null
+          : (saved?['cameraX'] as num?)?.toDouble(),
       storageError: storageError,
     ),
   );
@@ -170,6 +173,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   InkSession get s => widget.session;
   bool _loading = true, _settings = false, _saved = false, _saveError = false;
   int? _pointer;
+  bool _opening = false, _openingSeen = false;
   Timer? _saveIndicator;
   @override
   void initState() {
@@ -240,10 +244,35 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     unawaited(_save());
   }
 
-  void _start() {
+  void _start() async {
+    if (!_openingSeen &&
+        !widget.restored &&
+        !s.lab &&
+        s.x == 0 &&
+        s.levelIndex == 0) {
+      String? seen;
+      try {
+        seen = await widget.store.read('ink.story.opening.v1');
+      } catch (_) {}
+      if (!mounted) return;
+      _openingSeen = seen == 'seen';
+      if (!_openingSeen) {
+        setState(() => _opening = true);
+        return;
+      }
+    }
     s.start();
     widget.sound.resume();
     setState(() => _settings = false);
+  }
+
+  void _finishOpening() {
+    _openingSeen = true;
+    setState(() => _opening = false);
+    unawaited(
+      widget.store.write('ink.story.opening.v1', 'seen').catchError((_) {}),
+    );
+    _start();
   }
 
   void _retry() {
@@ -391,6 +420,13 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                               s.phase == Phase.complete ||
                               (s.phase == Phase.dead && game.deadAge > .48)))
                         Positioned.fill(child: _overlay(factor)),
+                      if (_opening && !_loading)
+                        Positioned.fill(
+                          child: InkOpening(
+                            art: game.openingArt,
+                            onComplete: _finishOpening,
+                          ),
+                        ),
                       if (_saveError || widget.storageError != null)
                         Positioned(
                           left: 18,
@@ -569,14 +605,14 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                 ? 'Bilyeyi çiçekli yuvaya ulaştır.'
                 : 'İki boşluk için çizgilerini sırayla kullan.'}'
           : widget.restored || s.x > 0
-          ? 'Kâğıt seni bekliyor.'
+          ? (s.migratedLayout
+                ? 'Parkur yenilendi. Tamamladığın bölümler korundu;\nmevcut bölümün başından devam edeceksin.'
+                : 'Kâğıt seni bekliyor.')
           : 'Her çizgi, biraz daha yakın.';
     } else if (dead) {
       subtitle = s.message;
     } else if (complete) {
-      subtitle = s.lab
-          ? 'Bu mekanik denemesi tamamlandı.'
-          : 'İlk iki bölümün sonuna ulaştın.\nYolculuğun bu ilk taslağı burada bitiyor.';
+      subtitle = s.lab ? 'Bu mekanik denemesi tamamlandı.' : 'İlk iki bölümün sonuna ulaştın.\nYolculuğun bu ilk taslağı burada bitiyor.';
     } else {
       subtitle = _settings
           ? 'Kâğıdın sesini kendine göre ayarla.'
@@ -687,6 +723,13 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       _start,
                       f,
                     ),
+                    if (!s.lab)
+                      _button(
+                        'Hikâyeyi izle',
+                        () => setState(() => _opening = true),
+                        f,
+                        primary: false,
+                      ),
                     _button(
                       'Ses ayarları',
                       () => setState(() => _settings = true),

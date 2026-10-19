@@ -412,6 +412,8 @@ class InkSession {
   String message = '', lastEvent = '';
   double messageUntil = 0;
   bool firstDrawDone = false;
+  bool migratedLayout = false;
+  double get walkSpeed => lab ? 32 : 56;
   void Function(String, V)? onEvent;
   void Function(bool)? onSaveRequested;
   double saveElapsed = 0;
@@ -714,7 +716,7 @@ class InkSession {
     if (grounded) {
       final old = _support(x, y, 1.2);
       final slope = old?.$3 ?? 0;
-      final dx = 32 * dt / math.sqrt(1 + slope * slope);
+      final dx = walkSpeed * dt / math.sqrt(1 + slope * slope);
       final next = _support(x + dx, y, 1.2);
       if (next != null) {
         final oldWalk = walked;
@@ -722,7 +724,7 @@ class InkSession {
         x += dx;
         y = next.$1;
         onNatural = next.$2;
-        if ((walked / 14).floor() > (oldWalk / 14).floor()) {
+        if ((walked / 20).floor() > (oldWalk / 20).floor()) {
           emit('step');
         }
         return;
@@ -732,7 +734,7 @@ class InkSession {
       vy = 0;
     }
     final previousY = y;
-    x += 32 * dt;
+    x += walkSpeed * dt;
     vy -= 160 * dt;
     y += vy * dt;
     double? landing;
@@ -949,6 +951,7 @@ class InkSession {
 
   Map<String, dynamic> snapshot() => {
     'schema': 1,
+    'layoutRevision': levelData.first['layoutRevision'] ?? 1,
     'lab': lab,
     'levelIndex': levelIndex,
     'phase': phase.name,
@@ -998,6 +1001,23 @@ class InkSession {
     s.levelIndex = (m['levelIndex'] as num).toInt().clamp(0, data.length - 1);
     s._loadLevel();
     double d(String k) => (m[k] as num).toDouble();
+    if ((m['layoutRevision'] ?? 1) != (data.first['layoutRevision'] ?? 1)) {
+      // Shortened routes invalidate old local line/terrain coordinates. Preserve
+      // completed chapters and restart only the current death checkpoint.
+      s.entryInk = d('entryInk');
+      s.ink = s.entryInk;
+      s.origin = data
+          .take(s.levelIndex)
+          .fold<double>(
+            0,
+            (sum, level) => sum + (level['width'] as num).toDouble(),
+          );
+      s.activeTotal = d('activeTotal');
+      s.resetEpoch = (m['resetEpoch'] as num).toInt() + 1;
+      s.firstDrawDone = m['firstDrawDone'] == true;
+      s.migratedLayout = true;
+      return s;
+    }
     s.ink = d('ink');
     s.entryInk = d('entryInk');
     s.x = d('x');

@@ -1,9 +1,12 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+
 import 'core/ink_model.dart';
 import 'presentation/ink_motion.dart';
+import 'presentation/paper_world.dart';
 
 class InkGame extends FlameGame {
   InkGame(this.session, {this.onFrame, this.onEffect, this.initialCamera});
@@ -11,10 +14,12 @@ class InkGame extends FlameGame {
   final VoidCallback? onFrame;
   final void Function(String)? onEffect;
   final double? initialCamera;
-  late ui.Image dot, props, garden;
+  late ui.Image dot, props, garden, openingArt;
+  late PaperWorld paperWorld;
   bool sceneReady = false;
   double cameraX = -96, visualTime = 0, deadAge = 0, _uiTime = 0;
   double _origin = 0;
+  double _landAt = -10;
   double? _gateAt;
   final Map<String, double> _lineBorn = {};
   final List<InkPickupFlight> _flights = [];
@@ -33,6 +38,22 @@ class InkGame extends FlameGame {
     dot = await images.load('dot_walk.png');
     props = await images.load('props.png');
     garden = await images.load('paper_garden.png');
+    final ruins = await images.load('paper_ruins.png');
+    openingArt = await images.load('storyboard_opening.png');
+    final memories = <PaperMemory>[];
+    var levelOrigin = 0.0;
+    for (final level in session.levelData) {
+      for (final memory in (level['memories'] as List? ?? const [])) {
+        memories.add(
+          PaperMemory(
+            levelOrigin + (memory['x'] as num).toDouble(),
+            memory['kind'] == 'letter',
+          ),
+        );
+      }
+      levelOrigin += (level['width'] as num).toDouble();
+    }
+    paperWorld = PaperWorld(garden, ruins, memories);
     cameraX = initialCamera ?? session.x - 96;
     _origin = session.origin;
     _cacheNext();
@@ -53,6 +74,7 @@ class InkGame extends FlameGame {
     _flights.clear();
     visualTime = 0;
     deadAge = 0;
+    _landAt = -10;
     particles.clear();
     _cacheNext();
   }
@@ -69,6 +91,7 @@ class InkGame extends FlameGame {
 
   void effect(String name, V at) {
     onEffect?.call(name);
+    if (name == 'land') _landAt = visualTime;
     if (name == 'death') {
       deadAge = 0;
     }
@@ -153,25 +176,7 @@ class InkGame extends FlameGame {
       const Rect.fromLTWH(0, 0, 480, worldHeight),
       Paint()..color = const Color(0xfff5f0e4),
     );
-    // An original paper panorama, moving more slowly than the physical foreground.
-    final bgW = garden.width / garden.height * 590;
-    final bx = -((cameraX + session.origin) * .13 % bgW);
-    for (var i = -1; i <= 1; i++) {
-      canvas.drawImageRect(
-        garden,
-        Rect.fromLTWH(0, 0, garden.width.toDouble(), garden.height.toDouble()),
-        Rect.fromLTWH(bx + bgW * i, 0, bgW + 1, 590),
-        Paint()..color = const Color.fromRGBO(255, 255, 255, .61),
-      );
-    }
-    canvas.drawRect(
-      const Rect.fromLTWH(0, 0, 480, 210),
-      Paint()
-        ..shader = ui.Gradient.linear(Offset.zero, const Offset(0, 210), [
-          const Color(0xfff6f2e9),
-          const Color(0x00f6f2e9),
-        ]),
-    );
+    paperWorld.background(canvas, cameraX + session.origin);
     _cacheNext();
     // Distant pencil stems; they never act as collision surfaces.
     for (final s in session.level.terrain) {
@@ -423,17 +428,7 @@ class InkGame extends FlameGame {
     }
     _firstDrawHint(canvas);
     _dot(canvas);
-    // A little foreground paper grain, kept static to avoid visual noise.
-    for (var i = 0; i < 80; i++) {
-      final x = (i * 173.13) % 480, y = 650 + (i * 83.7) % 203;
-      canvas.drawLine(
-        Offset(x, y),
-        Offset(x + 2 + (i % 4), y - .6),
-        Paint()
-          ..color = const Color(0x107c6c50)
-          ..strokeWidth = .7,
-      );
-    }
+    paperWorld.foreground(canvas, cameraX + session.origin);
     if (session.phase == Phase.resumeStroke && draft != null) {
       final q = point(draft.points.last);
       canvas.drawCircle(
@@ -667,7 +662,15 @@ class InkGame extends FlameGame {
     c.save();
     c.translate(0, -pose.rise);
     c.rotate(pose.lean);
-    c.scale(pose.width, pose.height);
+    final landing = ((visualTime - _landAt) / .28).clamp(0.0, 1.0);
+    final impact = math.sin(landing * math.pi) * .10;
+    final falling = session.grounded
+        ? 0.0
+        : (-session.vy / 250).clamp(0.0, 1.0);
+    c.scale(
+      pose.width + impact - falling * .05,
+      pose.height - impact + falling * .10,
+    );
     // Keep one detailed body identity and animate the feet separately; no pose popping.
     c.clipRect(const Rect.fromLTRB(-35, -60, 35, -7));
     c.drawImageRect(
@@ -676,6 +679,20 @@ class InkGame extends FlameGame {
       const Rect.fromLTWH(-27, -47.52, 54, 54),
       Paint()..filterQuality = FilterQuality.medium,
     );
+    // Eyelids close briefly on a deterministic, pause-safe rhythm.
+    final blinkTime = visualTime % 4.7;
+    final blink = blinkTime < .16 ? math.sin(blinkTime / .16 * math.pi) : 0.0;
+    if (blink > .05) {
+      for (final eye in [
+        const Rect.fromLTWH(-.9, -24.6, 6.9, 10.6),
+        const Rect.fromLTWH(9.1, -25.0, 4.5, 9.3),
+      ]) {
+        c.drawOval(
+          Rect.fromLTWH(eye.left, eye.top, eye.width, eye.height * blink),
+          Paint()..color = const Color(0xff292723),
+        );
+      }
+    }
     c.restore();
     foot(pose.front, 5, true);
     c.restore();

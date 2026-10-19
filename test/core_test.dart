@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ink_escape/core/ink_model.dart';
 import 'package:ink_escape/core/save_journal.dart';
@@ -171,6 +172,8 @@ void main() {
     () {
       final s = game();
       s.ink = 100;
+      // Isolate regeneration from the pickup reached sooner at the new speed.
+      s.collected.addAll(s.level.pickups.map((p) => p.id));
       s.advance(1);
       expect(s.ink, closeTo(110, .01));
       expect(draw(s, [const V(320, 0), const V(392, 0)]), isTrue);
@@ -230,8 +233,8 @@ void main() {
         },
       );
       expect(s.phase, Phase.complete);
-      expect(boundaryTime, closeTo(300, 20));
-      expect(s.activeTotal, closeTo(600, 30));
+      expect(boundaryTime, closeTo(150, 8));
+      expect(s.activeTotal, closeTo(300, 12));
       expect(s.ink, lessThanOrEqualTo(240));
       expect(entry, isNotNull);
       s.phase = Phase.playing;

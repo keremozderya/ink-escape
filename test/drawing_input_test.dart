@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
+
 import 'package:flame/flame.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +27,8 @@ void main() {
             'dot_walk.png',
             'props.png',
             'paper_garden.png',
+            'paper_ruins.png',
+            'storyboard_opening.png',
           ]);
         });
         final raw = jsonDecode(
@@ -51,8 +54,10 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.tap(find.text('Yolculuğa başla'));
         await tester.pump();
+        await tester.tap(find.text('Hikâyeyi atla'));
+        await tester.pump();
         final state = tester.state<GameScreenState>(find.byType(GameScreen));
-        s.advance(4);
+        s.advance(128 / s.walkSpeed);
         state.game.cameraX = s.x - 96;
         await tester.pump();
         final origin = tester.getTopLeft(

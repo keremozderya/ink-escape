@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flame/flame.dart';
 import 'package:flutter/rendering.dart';
@@ -27,6 +28,8 @@ void main() {
           'dot_walk.png',
           'props.png',
           'paper_garden.png',
+          'paper_ruins.png',
+          'storyboard_opening.png',
         ]);
         for (final entry in {
           'Nunito': 'Nunito.ttf',
@@ -79,9 +82,14 @@ void main() {
       await capture('01-opening');
       await tester.tap(find.text('Yolculuğa başla'));
       await tester.pump();
+      expect(s.phase, Phase.ready);
+      await tester.pump(const Duration(seconds: 1));
+      await capture('04-story-opening');
+      await tester.tap(find.text('Hikâyeyi atla'));
+      await tester.pump();
       expect(s.phase, Phase.playing);
       // Exercise the real widget event path, not the session API directly.
-      s.advance(5);
+      s.advance(160 / s.walkSpeed);
       state.game.cameraX = s.x - 96;
       await tester.pump();
       final origin = tester.getTopLeft(
@@ -106,7 +114,7 @@ void main() {
         isNotEmpty,
         reason: 'Pointer drag and release must commit the line: ${s.message}',
       );
-      s.advance(5.4);
+      s.advance(172.8 / s.walkSpeed);
       state.game.cameraX = s.x - 96;
       state.game.visualTime = s.gameTime;
       state.game.update(0);
@@ -115,6 +123,12 @@ void main() {
       expect(s.y, greaterThan(0));
       expect(s.grounded, isTrue);
       await capture('02-first-bridge');
+      final savedCamera = state.game.cameraX;
+      state.game.cameraX = (data.first['memories'][0]['x'] as num).toDouble();
+      await tester.pump();
+      await capture('05-note-parallax');
+      state.game.cameraX = savedCamera;
+      await tester.pump();
       await tester.tap(find.byTooltip('Duraklat'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
