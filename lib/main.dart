@@ -17,7 +17,10 @@ const paper = Color(0xfff6f1e6),
     muted = Color(0xff827563);
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -174,6 +177,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   bool _loading = true, _settings = false, _saved = false, _saveError = false;
   int? _pointer;
   bool _opening = false, _openingSeen = false;
+  bool _mainMenu = false;
   Timer? _saveIndicator;
   @override
   void initState() {
@@ -244,7 +248,26 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     unawaited(_save());
   }
 
+  void _returnToMenu() {
+    s.pause();
+    widget.sound.pause();
+    _pointer = null;
+    setState(() {
+      _mainMenu = true;
+      _settings = false;
+      _opening = false;
+    });
+    unawaited(_save());
+  }
+
   void _start() async {
+    if (_mainMenu && s.phase == Phase.complete) {
+      s.levelIndex = 0;
+      s.entryInk = 180;
+      s.origin = 0;
+      _retry();
+    }
+    _mainMenu = false;
     if (!_openingSeen &&
         !widget.restored &&
         !s.lab &&
@@ -298,10 +321,10 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       body: SafeArea(
         child: Center(
           child: AspectRatio(
-            aspectRatio: 9 / 16,
+            aspectRatio: 16 / 9,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final factor = constraints.maxWidth / 480;
+                final factor = (constraints.maxHeight / 480).clamp(0.65, 1.25).toDouble();
                 return ClipRect(
                   child: Stack(
                     children: [
@@ -369,6 +392,13 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                           top: 30 * factor,
                           child: _hud(factor),
                         ),
+                      if (!_loading && !_mainMenu && s.stuckCountdown != null)
+                        Positioned(
+                          top: 90 * factor,
+                          left: 0,
+                          right: 0,
+                          child: IgnorePointer(child: _stuckWarning(factor)),
+                        ),
                       if (!_loading &&
                           s.phase == Phase.playing &&
                           !s.firstDrawDone &&
@@ -376,9 +406,9 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         Positioned(
                           left: 24 * factor,
                           right: 24 * factor,
-                          top: 650 * factor,
+                          bottom: 65 * factor,
                           child: _instruction(
-                            'İki sabit kâğıt kenarını birleştir.\nParmağını kaldırınca yolun gerçek olur.',
+                            'Sabit bir kâğıt kenarından başlayıp yolunu çiz.\nBitiş noktası serbest; Dot çıkamazsa takılır.',
                             factor,
                           ),
                         ),
@@ -386,7 +416,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         Positioned(
                           left: 22 * factor,
                           right: 22 * factor,
-                          top: 665 * factor,
+                          bottom: 55 * factor,
                           child: Column(
                             children: [
                               _instruction(
@@ -411,14 +441,14 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         Positioned(
                           left: 24 * factor,
                           right: 24 * factor,
-                          top: 720 * factor,
+                          bottom: 24 * factor,
                           child: _instruction(s.message, factor),
                         ),
                       if (!_loading &&
-                          (s.phase == Phase.ready ||
+                          (_mainMenu || s.phase == Phase.ready ||
                               s.phase == Phase.paused ||
                               s.phase == Phase.complete ||
-                              (s.phase == Phase.dead && game.deadAge > .48)))
+                              (s.phase == Phase.dead && game.deathEffectComplete)))
                         Positioned.fill(child: _overlay(factor)),
                       if (_opening && !_loading)
                         Positioned.fill(
@@ -445,6 +475,51 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                   ),
                 );
               },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stuckWarning(double f) {
+    final remaining = s.stuckCountdown!;
+    return Center(
+      child: Semantics(
+        liveRegion: true,
+        label: '$remaining saniye. Dot ilerleyemiyor.',
+        child: ExcludeSemantics(
+          child: Container(
+            key: const ValueKey('ink-stuck-countdown'),
+            padding: EdgeInsets.symmetric(horizontal: 24 * f, vertical: 8 * f),
+            decoration: BoxDecoration(
+              color: paper.withValues(alpha: .94),
+              borderRadius: BorderRadius.circular(14 * f),
+              border: Border.all(color: const Color(0x558d6b45)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 160),
+                  child: Text(
+                    '$remaining',
+                    key: ValueKey(remaining),
+                    style: TextStyle(
+                      fontFamily: 'Cormorant',
+                      fontSize: 46 * f,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                      color: const Color(0xff805f3c),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 3 * f),
+                Text(
+                  'Dot ilerleyemiyor',
+                  style: TextStyle(fontSize: 13 * f, color: muted),
+                ),
+              ],
             ),
           ),
         ),
@@ -580,7 +655,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     ),
   );
   Widget _overlay(double f) {
-    final ready = s.phase == Phase.ready,
+    final ready = _mainMenu || s.phase == Phase.ready,
         dead = s.phase == Phase.dead,
         complete = s.phase == Phase.complete;
     final title = _settings
@@ -637,8 +712,10 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
             Positioned(
               left: 25 * f,
               right: 25 * f,
-              top: ready ? 171 * f : 210 * f,
-              child: Column(
+              top: 12 * f,
+              bottom: 12 * f,
+              child: SingleChildScrollView(
+                child: Column(
                 children: [
                   if (ready)
                     Text(
@@ -717,7 +794,9 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                     _button('Geri', () => setState(() => _settings = false), f),
                   ] else if (ready) ...[
                     _button(
-                      widget.restored || s.x > 0
+                      s.phase == Phase.complete
+                          ? 'Yeniden başla'
+                          : widget.restored || s.x > 0
                           ? 'Devam et'
                           : 'Yolculuğa başla',
                       _start,
@@ -764,33 +843,21 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                     ),
                     _button('Bölümü baştan başlat', _retry, f, primary: false),
                   ],
-                ],
-              ),
-            ),
-            if (ready && !_settings)
-              Positioned(
-                left: 30 * f,
-                right: 30 * f,
-                bottom: 65 * f,
-                child: Column(
-                  children: [
+                  if (ready && !_settings) ...[
+                    SizedBox(height: 12 * f),
                     Text(
                       'Dot kendi yürür. Sen ona bir yol çiz.',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 13 * f, color: muted),
                     ),
-                    SizedBox(height: 13 * f),
-                    Text(
-                      'İLK OYNANABİLİR TASLAK  ·  0.2',
-                      style: TextStyle(
-                        fontSize: 8 * f,
-                        letterSpacing: 2 * f,
-                        color: muted.withValues(alpha: .7),
-                      ),
-                    ),
                   ],
+                  if (!_settings && !ready && !dead)
+                    _button('Ana Menüye Dön', _returnToMenu, f, primary: false),
+                ],
                 ),
               ),
+            ),
+
           ],
         ),
       ),

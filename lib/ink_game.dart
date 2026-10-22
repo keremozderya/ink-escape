@@ -5,6 +5,7 @@ import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 
 import 'core/ink_model.dart';
+import 'presentation/ink_death.dart';
 import 'presentation/ink_motion.dart';
 import 'presentation/paper_world.dart';
 
@@ -27,7 +28,9 @@ class InkGame extends FlameGame {
   Level? _nextLevel;
   int _shownIndex = -1;
   static const double worldWidth = 480, worldHeight = 853.333, baseline = 588;
-  double get scale => size.x / worldWidth;
+  double get scale => size.y / worldHeight;
+  double get visibleWidth => size.x / scale;
+  bool get deathEffectComplete => deadAge >= InkDeathPose.duration;
   V worldPoint(Offset local) =>
       V(local.dx / scale + cameraX, baseline - local.dy / scale);
   Offset point(V p) => Offset(p.x - cameraX, baseline - p.y);
@@ -94,6 +97,8 @@ class InkGame extends FlameGame {
     if (name == 'land') _landAt = visualTime;
     if (name == 'death') {
       deadAge = 0;
+      particles.clear();
+      _flights.clear();
     }
     if (name == 'commit' && session.lines.isNotEmpty) {
       _lineBorn[session.lines.last.id] = visualTime;
@@ -171,19 +176,19 @@ class InkGame extends FlameGame {
     }
     canvas.save();
     canvas.scale(scale);
-    canvas.clipRect(const Rect.fromLTWH(0, 0, worldWidth, worldHeight));
+    canvas.clipRect(Rect.fromLTWH(0, 0, visibleWidth, worldHeight));
     canvas.drawRect(
-      const Rect.fromLTWH(0, 0, 480, worldHeight),
+      Rect.fromLTWH(0, 0, visibleWidth, worldHeight),
       Paint()..color = const Color(0xfff5f0e4),
     );
-    paperWorld.background(canvas, cameraX + session.origin);
+    paperWorld.background(canvas, cameraX + session.origin, width: visibleWidth, groundY: baseline);
     _cacheNext();
     // Distant pencil stems; they never act as collision surfaces.
     for (final s in session.level.terrain) {
       if (s.id == 'next-tail') {
         continue;
       }
-      if (s.b.x < cameraX - 40 || s.a.x > cameraX + 520) {
+      if (s.b.x < cameraX - 40 || s.a.x > cameraX + visibleWidth + 40) {
         continue;
       }
       _terrain(canvas, s);
@@ -195,7 +200,7 @@ class InkGame extends FlameGame {
           continue;
         }
         final offset = V(session.level.width, 0);
-        if (t.a.x + offset.x > cameraX + 520) {
+        if (t.a.x + offset.x > cameraX + visibleWidth + 40) {
           break;
         }
         if (t.b.x + offset.x >= cameraX) {
@@ -297,7 +302,7 @@ class InkGame extends FlameGame {
       }
     }
     for (final p in session.level.pickups) {
-      if (session.collected.contains(p.id) || (p.p.x - cameraX).abs() > 600) {
+      if (session.collected.contains(p.id) || (p.p.x - cameraX < -120 || p.p.x - cameraX > visibleWidth + 120)) {
         continue;
       }
       _prop(
@@ -428,7 +433,7 @@ class InkGame extends FlameGame {
     }
     _firstDrawHint(canvas);
     _dot(canvas);
-    paperWorld.foreground(canvas, cameraX + session.origin);
+    paperWorld.foreground(canvas, cameraX + session.origin, width: visibleWidth);
     if (session.phase == Phase.resumeStroke && draft != null) {
       final q = point(draft.points.last);
       canvas.drawCircle(
@@ -514,7 +519,7 @@ class InkGame extends FlameGame {
     if (s.b.x - s.a.x > 100) {
       final base = s.a.x + 65;
       for (var xx = base; xx < s.b.x - 32; xx += 237) {
-        if (xx - cameraX < -80 || xx - cameraX > 560) {
+        if (xx - cameraX < -80 || xx - cameraX > visibleWidth + 80) {
           continue;
         }
         _prop(c, 6, point(V(xx, s.yAt(xx))), 65, 63, bottom: .94);
@@ -582,8 +587,23 @@ class InkGame extends FlameGame {
   }
 
   void _dot(Canvas c) {
-    final q = point(V(session.x, session.y));
-    final walking = session.phase == Phase.playing && session.grounded;
+    final dead = session.phase == Phase.dead;
+    final position = point(V(session.x, session.y));
+    // Falling deaths finish below the viewport. Keep the last ink splash at
+    // its edge so that the effect remains visible before the retry menu.
+    final q = dead
+        ? Offset(
+            position.dx.clamp(32, visibleWidth - 32).toDouble(),
+            position.dy.clamp(65, worldHeight - 24).toDouble(),
+          )
+        : position;
+    final death = InkDeathPose(deadAge);
+    if (dead && death.bodyOpacity == 0) {
+      _deathInk(c, q, death);
+      return;
+    }
+    final walking =
+        (session.phase == Phase.playing || dead) && session.grounded;
     var floorSlope = 0.0;
     if (session.grounded) {
       for (final surface in session.level.terrain) {
@@ -599,18 +619,26 @@ class InkGame extends FlameGame {
         }
       }
     }
+    // A tiny near-vertical step is climbable, but its tangent must not stretch
+    // the walking legs across the screen while Dot steps up it.
+    floorSlope = floorSlope
+        .clamp(-InkSession.maxClimbSlope, InkSession.maxClimbSlope)
+        .toDouble();
     final pose = InkWalkPose.sample(
       session.walked,
       grounded: session.grounded,
       walking: walking,
       time: visualTime,
     );
-    final dead = session.phase == Phase.dead;
-    final death = Curves.easeInOutCubic.transform(
-      (deadAge / .5).clamp(0.0, 1.0).toDouble(),
-    );
     final sw = dot.width / 4, sh = dot.height / 2;
     final src = Rect.fromLTWH(0, 0, sw, sh);
+    if (dead) {
+      c.saveLayer(
+        Rect.fromCenter(center: q - const Offset(0, 25), width: 90, height: 100),
+        Paint()..color = Color.fromRGBO(255, 255, 255, death.bodyOpacity),
+      );
+      c.translate(0, -death.bodyLift);
+    }
     c.drawOval(
       Rect.fromCenter(
         center: q + const Offset(0, 2),
@@ -623,9 +651,6 @@ class InkGame extends FlameGame {
     );
     c.save();
     c.translate(q.dx, q.dy);
-    if (dead) {
-      c.scale(1 + death * .5, 1 - death * .86);
-    }
     void foot(InkFootPose p, double hip, bool front) {
       final x = p.x + hip * .18;
       final y = -p.lift - x * floorSlope;
@@ -696,6 +721,60 @@ class InkGame extends FlameGame {
     c.restore();
     foot(pose.front, 5, true);
     c.restore();
+    if (dead) {
+      c.restore();
+      _deathInk(c, q, death);
+    }
+  }
+
+  void _deathInk(Canvas c, Offset at, InkDeathPose pose) {
+    if (deadAge >= InkDeathPose.duration) return;
+    c.save();
+    c.translate(at.dx, at.dy);
+    if (session.grounded) {
+      final stain = Path()
+        ..moveTo(-17, 1)
+        ..cubicTo(-15, -2, -5, -3, 1, -1)
+        ..cubicTo(10, -3, 21, 0, 17, 3)
+        ..cubicTo(12, 6, -6, 4, -17, 1)
+        ..close();
+      c.drawPath(
+        stain,
+        Paint()..color = const Color(0xff38312a).withValues(alpha: pose.stainOpacity),
+      );
+    }
+    c.drawOval(
+      Rect.fromCenter(
+        center: const Offset(0, -22),
+        width: pose.rippleRadius * 2,
+        height: pose.rippleRadius * 1.5,
+      ),
+      Paint()
+        ..color = const Color(0xff827563).withValues(alpha: pose.rippleOpacity)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = .8,
+    );
+    for (final drop in pose.drops) {
+      c.save();
+      c.translate(drop.x, drop.y);
+      c.rotate(drop.angle);
+      final shape = Rect.fromCenter(
+        center: Offset.zero,
+        width: drop.radius * drop.stretch * 2,
+        height: drop.radius * 1.5,
+      );
+      c.drawOval(
+        shape,
+        Paint()..color = const Color(0xff302b26).withValues(alpha: drop.opacity),
+      );
+      c.drawOval(
+        Rect.fromLTWH(shape.left + drop.radius * .4, shape.top + .3,
+            drop.radius, drop.radius * .35),
+        Paint()..color = const Color(0xffa9987b).withValues(alpha: drop.opacity * .28),
+      );
+      c.restore();
+    }
+    c.restore();
   }
 
   void _prop(
@@ -708,7 +787,7 @@ class InkGame extends FlameGame {
     double rotation = 0,
     double alpha = 1,
   }) {
-    if (p.dx < -120 || p.dx > 600) {
+    if (p.dx < -120 || p.dx > visibleWidth + 120) {
       return;
     }
     final sw = props.width / 4, sh = props.height / 2;

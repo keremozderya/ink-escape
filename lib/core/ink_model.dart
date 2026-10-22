@@ -28,6 +28,13 @@ List<V> smoothStroke(List<V> input, {double tolerance = 1.7}) {
   if (input.length < 3) {
     return List<V>.of(input);
   }
+  // X resampling cannot represent verticals, loops or deliberate backtracking.
+  // Keep those contours intact instead of flattening or rejecting them.
+  for (var i = 1; i < input.length; i++) {
+    if (input[i].x <= input[i - 1].x) {
+      return List<V>.of(input);
+    }
+  }
   final first = input.first, last = input.last, dx = last.x - first.x;
   if (dx <= 0) {
     return List<V>.of(input);
@@ -49,7 +56,16 @@ List<V> smoothStroke(List<V> input, {double tolerance = 1.7}) {
   for (var i = 1; i < count; i++) {
     var y = 0.0;
     for (var k = -2; k <= 2; k++) {
-      y += sampled[(i + k).clamp(0, count)].y * weights[k + 2] / 16;
+      final index = i + k;
+      // Extend the end tangents rather than repeating the endpoint. Repeated
+      // padding would turn a straight 55-degree line into a steeper bump.
+      final height = index < 0
+          ? sampled.first.y + (sampled[1].y - sampled.first.y) * index
+          : index > count
+          ? sampled.last.y +
+                (sampled.last.y - sampled[count - 1].y) * (index - count)
+          : sampled[index].y;
+      y += height * weights[k + 2] / 16;
     }
     y = sampled[i].y + (y - sampled[i].y).clamp(-tolerance, tolerance);
     result.add(V(sampled[i].x, y));
@@ -170,32 +186,43 @@ class InkLine {
   bool retired = false;
   double retiredAt = 0;
   double get cost => pathLength(points);
-  double get left => points.first.x;
-  double get right => points.last.x;
-  double? yAt(double x) {
+  double get left => points.map((p) => p.x).reduce(math.min);
+  double get right => points.map((p) => p.x).reduce(math.max);
+
+  Iterable<(double, double)> crossingsAt(double x) sync* {
     for (var i = 1; i < points.length; i++) {
       final a = points[i - 1], b = points[i];
-      if (x >= a.x - .001 && x <= b.x + .001) {
-        return a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x);
+      final dx = b.x - a.x;
+      // Vertical strokes are walls, never horizontal support or a NaN height.
+      if (dx.abs() <= 1e-7) continue;
+      if (x >= math.min(a.x, b.x) - .001 && x <= math.max(a.x, b.x) + .001) {
+        final slope = (b.y - a.y) / dx;
+        yield (a.y + slope * (x - a.x), slope);
       }
     }
-    return null;
+  }
+
+  double? yAt(double x) {
+    double? top;
+    for (final hit in crossingsAt(x)) {
+      if (top == null || hit.$1 > top) top = hit.$1;
+    }
+    return top;
   }
 
   double slopeAt(double x) {
-    for (var i = 1; i < points.length; i++) {
-      final a = points[i - 1], b = points[i];
-      if (x >= a.x - .001 && x <= b.x + .001) {
-        return (b.y - a.y) / (b.x - a.x);
-      }
+    (double, double)? top;
+    for (final hit in crossingsAt(x)) {
+      if (top == null || hit.$1 > top.$1) top = hit;
     }
-    return 0;
+    return top?.$2 ?? 0;
   }
 
   (V, double) atDistance(double s) {
     for (var i = 1; i < points.length; i++) {
       final a = points[i - 1], b = points[i];
       final length = a.distance(b);
+      if (length <= 1e-7) continue;
       if (s <= length || i == points.length - 1) {
         return (
           a + (b - a) * (s / length).clamp(0.0, 1.0).toDouble(),
@@ -231,6 +258,37 @@ class Draft {
   V rawPoint;
   bool backwards = false;
   V? get end => points.isEmpty ? null : points.last;
+}
+
+/// One continuous uphill section. Its total rise, rather than each tiny
+/// sampled segment, determines whether it is a small step or a tall wall.
+class _ClimbRun {
+  _ClimbRun(this.points, this.natural) : path = InkLine('climb', points);
+  final List<V> points;
+  final bool natural;
+  final InkLine path;
+  double get rise => points.last.y - points.first.y;
+
+  double? distanceAt(V point) {
+    var distance = 0.0;
+    var closest = .75;
+    double? result;
+    for (var i = 1; i < points.length; i++) {
+      final a = points[i - 1], b = points[i], ab = b - a;
+      final length = ab.length;
+      if (length <= 1e-7) continue;
+      final t = (((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) /
+              (length * length))
+          .clamp(0.0, 1.0);
+      final error = (a + ab * t).distance(point);
+      if (error <= closest) {
+        closest = error;
+        result = distance + length * t;
+      }
+      distance += length;
+    }
+    return result;
+  }
 }
 
 class Level {
@@ -403,6 +461,10 @@ class InkSession {
   double ink = 180, entryInk = 180;
   double x = 0, y = 0, vy = 0, gameTime = 0, realTime = 0, activeTotal = 0;
   double walked = 0, origin = 0;
+  static const maxClimbDegrees = 55.0, stuckLimit = 3.0, dotHeight = 32.0;
+  static final maxClimbSlope = math.tan(maxClimbDegrees * math.pi / 180);
+  double _stuckElapsed = 0;
+  V? _progressPoint;
   bool grounded = true, onNatural = true, strokePointerActive = false;
   final List<InkLine> lines = [];
   final Set<String> collected = {};
@@ -418,6 +480,12 @@ class InkSession {
   void Function(bool)? onSaveRequested;
   double saveElapsed = 0;
   int get activeLines => lines.where((l) => !l.retired).length;
+  int? get stuckCountdown {
+    // Ordinary walking briefly stays within the one-unit progress radius.
+    // Wait long enough to avoid a warning flashing on every normal footstep.
+    if (phase != Phase.playing || _stuckElapsed < .15) return null;
+    return (stuckLimit - _stuckElapsed).ceil().clamp(1, 3);
+  }
   Iterable<InkLine> get solidLines => lines.where((l) => !l.retired);
   void _loadLevel() {
     level = Level.from(levelData[levelIndex]);
@@ -491,9 +559,6 @@ class InkSession {
       d.backwards = true;
     }
     d.rawPoint = p;
-    if (p.x <= last.x + .4) {
-      return;
-    }
     final alpha = ((p - last).length / 7).clamp(.42, .96).toDouble();
     final filtered = last + (p - last) * alpha;
     d.points.add(filtered);
@@ -503,31 +568,19 @@ class InkSession {
   (List<V>?, String) validatedDraft() {
     final d = draft;
     if (d == null || d.points.length < 2) {
-      return (null, 'İki sabit yüzeyi birleştir.');
-    }
-    final end = anchorAt(d.points.last);
-    if (end == null) {
-      return (null, 'Diğer ucu da sabit kâğıda bırak.');
-    }
-    if (d.backwards) {
-      return (null, 'Çizgi soldan sağa ilerlemeli.');
+      return (null, 'Sabit bir kenardan başlayıp yolunu çiz.');
     }
     final raw = List<V>.of(d.points)..[0] = d.start.point;
-    raw[raw.length - 1] = end.point;
+    // Release may happen in open space. Nearby paper still offers a gentle snap.
+    final end = anchorAt(d.rawPoint);
+    raw[raw.length - 1] = end != null && end.point.distance(d.rawPoint) <= 6
+        ? end.point
+        : d.rawPoint;
     final p = smoothStroke(raw);
-    if (end.point.x - p.first.x < 12) {
-      return (null, 'İki ayrı kenarı birleştir.');
-    }
-    for (var i = 1; i < p.length; i++) {
-      final dx = p[i].x - p[i - 1].x;
-      if (dx <= .01) {
-        return (null, 'Çizgi kendi üzerine dönmesin.');
-      }
-      if (((p[i].y - p[i - 1].y) / dx).abs() > .70 + 1e-6) {
-        return (null, 'Bu kısım Dot için fazla dik.');
-      }
-    }
     final cost = pathLength(p);
+    if (cost < 12) {
+      return (null, 'Biraz daha uzun bir çizgi çiz.');
+    }
     if (cost > 220) {
       return (null, 'Çizgi 220 birimi aşmasın.');
     }
@@ -554,8 +607,7 @@ class InkSession {
     }
     var role = 'walk';
     final a = draft!.start.surface;
-    final b = anchorAt(p.last)!.surface;
-    if (a.tag == b.tag && a.tag != 'ground') {
+    if (a.tag != 'ground') {
       role = a.tag;
     }
     final line = InkLine('ink:${strokeSerial++}', p, role: role);
@@ -612,6 +664,8 @@ class InkSession {
     grounded = true;
     onNatural = true;
     walked = 0;
+    _stuckElapsed = 0;
+    _progressPoint = null;
     lines.clear();
     collected.clear();
     crumbs.clear();
@@ -657,6 +711,7 @@ class InkSession {
       final worldDt = h - .6 * slow;
       gameTime += worldDt;
       _walk(worldDt);
+      _trackProgress(h);
       _balls(worldDt);
       _rain(worldDt);
       _collect();
@@ -668,7 +723,7 @@ class InkSession {
         ink = math.min(240.0, ink + 10 * worldDt);
       }
       for (final r in level.hazards) {
-        if (x + 12 > r[0] && x - 12 < r[2] && y + 32 > r[1] && y < r[3]) {
+        if (x + 12 > r[0] && x - 12 < r[2] && y + dotHeight > r[1] && y < r[3]) {
           die('Gövden için biraz daha açıklık bırak.');
         }
       }
@@ -704,29 +759,26 @@ class InkSession {
       }
     }
     for (final l in solidLines) {
-      final yy = l.yAt(xx);
-      if (yy != null) {
-        consider(yy, false, l.slopeAt(xx));
+      for (final hit in l.crossingsAt(xx)) {
+        consider(hit.$1, false, hit.$2);
       }
     }
     return best;
   }
 
   void _walk(double dt) {
+    final climbs = _climbRuns.toList();
     if (grounded) {
+      if (_climbSmallStep(walkSpeed * dt, climbs)) return;
       final old = _support(x, y, 1.2);
       final slope = old?.$3 ?? 0;
+      if (slope > maxClimbSlope + 1e-6) return;
       final dx = walkSpeed * dt / math.sqrt(1 + slope * slope);
+      if (_blockedAhead(x + dx, y, climbs)) return;
       final next = _support(x + dx, y, 1.2);
       if (next != null) {
-        final oldWalk = walked;
-        walked += math.sqrt(dx * dx + math.pow(next.$1 - y, 2));
-        x += dx;
-        y = next.$1;
-        onNatural = next.$2;
-        if ((walked / 20).floor() > (oldWalk / 20).floor()) {
-          emit('step');
-        }
+        if (next.$3 > maxClimbSlope + 1e-6) return;
+        _walkTo(V(x + dx, next.$1), next.$2);
         return;
       }
       grounded = false;
@@ -734,7 +786,8 @@ class InkSession {
       vy = 0;
     }
     final previousY = y;
-    x += walkSpeed * dt;
+    final nextX = x + walkSpeed * dt;
+    if (!_blockedAhead(nextX, y, climbs)) x = nextX;
     vy -= 160 * dt;
     y += vy * dt;
     double? landing;
@@ -754,9 +807,8 @@ class InkSession {
       }
     }
     for (final l in solidLines) {
-      final yy = l.yAt(x);
-      if (yy != null) {
-        check(yy, false);
+      for (final hit in l.crossingsAt(x)) {
+        check(hit.$1, false);
       }
     }
     if (landing != null) {
@@ -765,6 +817,130 @@ class InkSession {
       grounded = true;
       onNatural = natural;
       emit('land');
+    }
+  }
+
+  void _walkTo(V target, bool natural) {
+    final oldWalk = walked;
+    walked += target.distance(V(x, y));
+    x = target.x;
+    y = target.y;
+    vy = 0;
+    grounded = true;
+    onNatural = natural;
+    if ((walked / 20).floor() > (oldWalk / 20).floor()) emit('step');
+  }
+
+  Iterable<_ClimbRun> _groupClimbs(Iterable<(V, V)> segments, bool natural) sync* {
+    List<V>? run;
+    for (final segment in segments) {
+      var a = segment.$1, b = segment.$2;
+      if (a.x > b.x || ((a.x - b.x).abs() <= 1e-7 && a.y > b.y)) {
+        final swap = a;
+        a = b;
+        b = swap;
+      }
+      final dx = b.x - a.x;
+      final steep = b.y > a.y + 1e-7 &&
+          (dx.abs() <= 1e-7 || (b.y - a.y) / dx > maxClimbSlope + 1e-6);
+      if (!steep) {
+        if (run != null) yield _ClimbRun(run, natural);
+        run = null;
+      } else if (run != null && run.last.distance(a) < .001) {
+        run.add(b);
+      } else if (run != null && b.distance(run.first) < .001) {
+        run.insert(0, a);
+      } else {
+        if (run != null) yield _ClimbRun(run, natural);
+        run = [a, b];
+      }
+    }
+    if (run != null) yield _ClimbRun(run, natural);
+  }
+
+  Iterable<_ClimbRun> get _climbRuns sync* {
+    final terrain = level.terrain.where((s) => s.tag == 'ground').toList()
+      ..sort((a, b) => a.a.x.compareTo(b.a.x));
+    yield* _groupClimbs(terrain.map((s) => (s.a, s.b)), true);
+    for (final line in solidLines) {
+      yield* _groupClimbs([
+        for (var i = 1; i < line.points.length; i++)
+          (line.points[i - 1], line.points[i]),
+      ], false);
+    }
+  }
+
+  bool _smallEnough(_ClimbRun run, double feetY) =>
+      run.rise <= dotHeight + 1e-6 &&
+      run.points.last.y - feetY <= dotHeight + 1e-6;
+
+  bool _climbSmallStep(double travel, List<_ClimbRun> climbs) {
+    for (final run in climbs) {
+      if (!_smallEnough(run, y)) continue;
+      double? distance;
+      var available = travel;
+      if (x < run.points.first.x - .001) {
+        final approach = run.points.first.x - x;
+        if (approach > travel || (y - run.points.first.y).abs() > .75) continue;
+        available -= approach;
+        distance = 0;
+      } else {
+        distance = run.distanceAt(V(x, y));
+      }
+      if (distance == null || distance >= run.path.cost - 1e-6) continue;
+      final nextDistance = math.min(run.path.cost, distance + available);
+      var target = run.path.atDistance(nextDistance).$1;
+      if (nextDistance >= run.path.cost - 1e-6) {
+        // Leave the shared vertex so the finished steep leg cannot trap Dot
+        // instead of allowing him onto the next surface (or off the free end).
+        target = target + const V(.002, 0);
+      }
+      _walkTo(target, run.natural);
+      return true;
+    }
+    return false;
+  }
+
+  bool _blockedAhead(double nextX, double feetY, List<_ClimbRun> climbs) {
+    // Sweep Dot's body against walls and slopes he cannot climb. Overhead
+    // roofs stay clear, and vertical strokes never become infinite slopes.
+    for (final run in climbs) {
+      if (_smallEnough(run, feetY)) continue;
+      for (var i = 1; i < run.points.length; i++) {
+        final a = run.points[i - 1], b = run.points[i];
+        final dx = b.x - a.x;
+        final vertical = dx.abs() <= 1e-7;
+        if (!vertical && (b.y - a.y) / dx <= maxClimbSlope + 1e-6) {
+          continue;
+        }
+        final left = math.max(x - 12, math.min(a.x, b.x));
+        final right = math.min(nextX + 12, math.max(a.x, b.x));
+        if (left > right) continue;
+        final low = vertical
+            ? math.min(a.y, b.y)
+            : a.y + (b.y - a.y) * (left - a.x) / dx;
+        final high = vertical
+            ? math.max(a.y, b.y)
+            : a.y + (b.y - a.y) * (right - a.x) / dx;
+        if (high > feetY + .5 && low < feetY + dotHeight) return true;
+      }
+    }
+    return false;
+  }
+
+  void _trackProgress(double dt) {
+    final position = V(x, y);
+    final previous = _progressPoint;
+    if (previous == null || position.distance(previous) >= 1) {
+      _progressPoint = position;
+      _stuckElapsed = 0;
+      return;
+    }
+    _stuckElapsed += dt;
+    if (_stuckElapsed >= stuckLimit - 1e-9) {
+      die(
+        'Dot 3 saniyedir ilerleyemiyor. Daha rahat çıkabileceği bir yol çiz.',
+      );
     }
   }
 
@@ -854,16 +1030,18 @@ class InkSession {
       var firstHit = -1000.0;
       bool hitsDot = false;
       for (final l in solidLines) {
-        final yy = l.yAt(c.x);
-        if (yy != null && yy <= before + 3 && yy >= c.y - 3 && yy > firstHit) {
-          firstHit = yy;
+        for (final hit in l.crossingsAt(c.x)) {
+          final yy = hit.$1;
+          if (yy <= before + 3 && yy >= c.y - 3 && yy > firstHit) {
+            firstHit = yy;
+          }
         }
       }
       if ((c.x - x).abs() < 15 &&
-          y + 32 <= before + 3 &&
-          y + 32 >= c.y - 3 &&
-          y + 32 > firstHit) {
-        firstHit = y + 32;
+          y + dotHeight <= before + 3 &&
+          y + dotHeight >= c.y - 3 &&
+          y + dotHeight > firstHit) {
+        firstHit = y + dotHeight;
         hitsDot = true;
       }
       if (firstHit > -900) {
@@ -932,6 +1110,8 @@ class InkSession {
     draft = null;
     strokePointerActive = false;
     gameTime = 0;
+    _stuckElapsed = 0;
+    _progressPoint = null;
     emit('boundary');
     onSaveRequested?.call(true);
   }
@@ -964,6 +1144,8 @@ class InkSession {
     'realTime': realTime,
     'activeTotal': activeTotal,
     'walked': walked,
+    'stuckElapsed': _stuckElapsed,
+    'progressPoint': _progressPoint?.toJson(),
     'origin': origin,
     'grounded': grounded,
     'onNatural': onNatural,
@@ -1028,6 +1210,10 @@ class InkSession {
     s.activeTotal = d('activeTotal');
     s.saveElapsed = (m['saveElapsed'] as num?)?.toDouble() ?? 0;
     s.walked = d('walked');
+    s._stuckElapsed = (m['stuckElapsed'] as num?)?.toDouble() ?? 0;
+    s._progressPoint = m['progressPoint'] == null
+        ? null
+        : V.from(m['progressPoint']);
     s.origin = d('origin');
     s.grounded = m['grounded'] == true;
     s.onNatural = m['onNatural'] == true;
