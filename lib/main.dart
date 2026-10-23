@@ -319,164 +319,158 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: AspectRatio(
-            aspectRatio: 16 / 9,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final factor = (constraints.maxHeight / 480).clamp(0.65, 1.25).toDouble();
-                return ClipRect(
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: Listener(
-                          key: const ValueKey('ink-drawing-surface'),
-                          behavior: HitTestBehavior.opaque,
-                          onPointerDown: (e) {
-                            if (_pointer == null && game.sceneReady) {
-                              if (s.beginStroke(
-                                game.worldPoint(e.localPosition),
-                              )) {
-                                _pointer = e.pointer;
-                              }
-                            }
-                          },
-                          onPointerMove: (e) {
-                            if (e.pointer == _pointer) {
-                              s.moveStroke(game.worldPoint(e.localPosition));
-                            }
-                          },
-                          onPointerUp: (e) {
-                            if (e.pointer == _pointer) {
-                              s.moveStroke(game.worldPoint(e.localPosition));
-                              s.endStroke();
-                              _pointer = null;
-                              setState(() {});
-                            }
-                          },
-                          onPointerCancel: (e) {
-                            if (e.pointer == _pointer) {
-                              s.losePointer();
-                              _pointer = null;
-                              widget.sound.pause();
-                              setState(() {});
-                            }
-                          },
-                          child: GameWidget(
-                            game: game,
-                            loadingBuilder: (_) => const ColoredBox(
-                              color: paper,
-                              child: Center(
-                                child: Text('Kâğıtlar hazırlanıyor…'),
-                              ),
-                            ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final factor = (constraints.maxHeight / 480)
+                .clamp(0.65, 1.25)
+                .toDouble();
+            return ClipRect(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Listener(
+                      key: const ValueKey('ink-drawing-surface'),
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: (e) {
+                        if (_pointer == null && game.sceneReady) {
+                          if (s.beginStroke(game.worldPoint(e.localPosition))) {
+                            _pointer = e.pointer;
+                          }
+                        }
+                      },
+                      onPointerMove: (e) {
+                        if (e.pointer == _pointer) {
+                          s.moveStroke(game.worldPoint(e.localPosition));
+                        }
+                      },
+                      onPointerUp: (e) {
+                        if (e.pointer == _pointer) {
+                          s.moveStroke(game.worldPoint(e.localPosition));
+                          s.endStroke();
+                          _pointer = null;
+                          setState(() {});
+                        }
+                      },
+                      onPointerCancel: (e) {
+                        if (e.pointer == _pointer) {
+                          s.losePointer();
+                          _pointer = null;
+                          widget.sound.pause();
+                          setState(() {});
+                        }
+                      },
+                      child: GameWidget(
+                        game: game,
+                        loadingBuilder: (_) => const ColoredBox(
+                          color: paper,
+                          child: Center(child: Text('Kâğıtlar hazırlanıyor…')),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: const Color(0x22887559),
+                            width: 1,
                           ),
                         ),
                       ),
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: const Color(0x22887559),
-                                width: 1,
-                              ),
-                            ),
-                          ),
-                        ),
+                    ),
+                  ),
+                  if (!_loading)
+                    Positioned(
+                      left: 30 * factor,
+                      right: 26 * factor,
+                      top: 30 * factor,
+                      child: _hud(factor),
+                    ),
+                  if (!_loading && !_mainMenu && s.stuckCountdown != null)
+                    Positioned(
+                      top: 90 * factor,
+                      left: 0,
+                      right: 0,
+                      child: IgnorePointer(child: _stuckWarning(factor)),
+                    ),
+                  if (!_loading &&
+                      s.phase == Phase.playing &&
+                      !s.firstDrawDone &&
+                      s.x > 60)
+                    Positioned(
+                      left: 24 * factor,
+                      right: 24 * factor,
+                      bottom: 65 * factor,
+                      child: _instruction(
+                        'Sabit bir kâğıt kenarından başlayıp yolunu çiz.\nBitiş noktası serbest; Dot çıkamazsa takılır.',
+                        factor,
                       ),
-                      if (!_loading)
-                        Positioned(
-                          left: 30 * factor,
-                          right: 26 * factor,
-                          top: 30 * factor,
-                          child: _hud(factor),
-                        ),
-                      if (!_loading && !_mainMenu && s.stuckCountdown != null)
-                        Positioned(
-                          top: 90 * factor,
-                          left: 0,
-                          right: 0,
-                          child: IgnorePointer(child: _stuckWarning(factor)),
-                        ),
-                      if (!_loading &&
-                          s.phase == Phase.playing &&
-                          !s.firstDrawDone &&
-                          s.x > 60)
-                        Positioned(
-                          left: 24 * factor,
-                          right: 24 * factor,
-                          bottom: 65 * factor,
-                          child: _instruction(
-                            'Sabit bir kâğıt kenarından başlayıp yolunu çiz.\nBitiş noktası serbest; Dot çıkamazsa takılır.',
+                    ),
+                  if (s.phase == Phase.resumeStroke)
+                    Positioned(
+                      left: 22 * factor,
+                      right: 22 * factor,
+                      bottom: 55 * factor,
+                      child: Column(
+                        children: [
+                          _instruction(
+                            'Yarım kalan çizginin ucuna dokun\nve kaldığın yerden devam et.',
                             factor,
                           ),
-                        ),
-                      if (s.phase == Phase.resumeStroke)
-                        Positioned(
-                          left: 22 * factor,
-                          right: 22 * factor,
-                          bottom: 55 * factor,
-                          child: Column(
-                            children: [
-                              _instruction(
-                                'Yarım kalan çizginin ucuna dokun\nve kaldığın yerden devam et.',
-                                factor,
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  s.cancelDraft();
-                                  s.phase = Phase.playing;
-                                  widget.sound.resume();
-                                  setState(() {});
-                                },
-                                child: const Text('Bu çizgiden vazgeç'),
-                              ),
-                            ],
+                          TextButton(
+                            onPressed: () {
+                              s.cancelDraft();
+                              s.phase = Phase.playing;
+                              widget.sound.resume();
+                              setState(() {});
+                            },
+                            child: const Text('Bu çizgiden vazgeç'),
                           ),
+                        ],
+                      ),
+                    ),
+                  if (s.phase == Phase.playing &&
+                      s.message.isNotEmpty &&
+                      s.realTime < s.messageUntil)
+                    Positioned(
+                      left: 24 * factor,
+                      right: 24 * factor,
+                      bottom: 24 * factor,
+                      child: _instruction(s.message, factor),
+                    ),
+                  if (!_loading &&
+                      (_mainMenu ||
+                          s.phase == Phase.ready ||
+                          s.phase == Phase.paused ||
+                          s.phase == Phase.complete ||
+                          (s.phase == Phase.dead && game.deathEffectComplete)))
+                    Positioned.fill(child: _overlay(factor)),
+                  if (_opening && !_loading)
+                    Positioned.fill(
+                      child: InkOpening(
+                        art: game.openingArt,
+                        onComplete: _finishOpening,
+                      ),
+                    ),
+                  if (_saveError || widget.storageError != null)
+                    Positioned(
+                      left: 18,
+                      right: 18,
+                      bottom: 6,
+                      child: Text(
+                        widget.storageError ?? 'Kayıt yazılamadı.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10 * factor,
+                          color: const Color(0xff916a4a),
                         ),
-                      if (s.phase == Phase.playing &&
-                          s.message.isNotEmpty &&
-                          s.realTime < s.messageUntil)
-                        Positioned(
-                          left: 24 * factor,
-                          right: 24 * factor,
-                          bottom: 24 * factor,
-                          child: _instruction(s.message, factor),
-                        ),
-                      if (!_loading &&
-                          (_mainMenu || s.phase == Phase.ready ||
-                              s.phase == Phase.paused ||
-                              s.phase == Phase.complete ||
-                              (s.phase == Phase.dead && game.deathEffectComplete)))
-                        Positioned.fill(child: _overlay(factor)),
-                      if (_opening && !_loading)
-                        Positioned.fill(
-                          child: InkOpening(
-                            art: game.openingArt,
-                            onComplete: _finishOpening,
-                          ),
-                        ),
-                      if (_saveError || widget.storageError != null)
-                        Positioned(
-                          left: 18,
-                          right: 18,
-                          bottom: 6,
-                          child: Text(
-                            widget.storageError ?? 'Kayıt yazılamadı.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 10 * factor,
-                              color: const Color(0xff916a4a),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -716,148 +710,161 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
               bottom: 12 * f,
               child: SingleChildScrollView(
                 child: Column(
-                children: [
-                  if (ready)
+                  children: [
+                    if (ready)
+                      Text(
+                        s.lab ? 'MEKANİK DENEMESİ' : 'BİR MÜREKKEP YOLCULUĞU',
+                        style: TextStyle(
+                          fontSize: 10 * f,
+                          letterSpacing: 3 * f,
+                          color: muted,
+                        ),
+                      ),
+                    SizedBox(height: ready ? 16 * f : 0),
                     Text(
-                      s.lab ? 'MEKANİK DENEMESİ' : 'BİR MÜREKKEP YOLCULUĞU',
+                      title,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: 10 * f,
-                        letterSpacing: 3 * f,
+                        fontFamily: 'Cormorant',
+                        fontSize: (ready ? 59 : 43) * f,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: ready ? 2 * f : 0,
+                        color: inkColor,
+                        height: 1.05,
+                      ),
+                    ),
+                    SizedBox(height: 17 * f),
+                    Text(
+                      subtitle,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 14 * f,
+                        height: 1.7,
                         color: muted,
                       ),
                     ),
-                  SizedBox(height: ready ? 16 * f : 0),
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: 'Cormorant',
-                      fontSize: (ready ? 59 : 43) * f,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: ready ? 2 * f : 0,
-                      color: inkColor,
-                      height: 1.05,
-                    ),
-                  ),
-                  SizedBox(height: 17 * f),
-                  Text(
-                    subtitle,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14 * f,
-                      height: 1.7,
-                      color: muted,
-                    ),
-                  ),
-                  SizedBox(height: 25 * f),
-                  if (_settings) ...[
-                    SizedBox(
-                      width: 285 * f,
-                      child: SwitchListTile(
-                        title: Text(
-                          'Yumuşak müzik',
-                          style: TextStyle(fontSize: 14 * f),
+                    SizedBox(height: 25 * f),
+                    if (_settings) ...[
+                      SizedBox(
+                        width: 285 * f,
+                        child: SwitchListTile(
+                          title: Text(
+                            'Yumuşak müzik',
+                            style: TextStyle(fontSize: 14 * f),
+                          ),
+                          value: widget.sound.musicOn,
+                          onChanged: (v) {
+                            widget.sound.setMusic(v);
+                            unawaited(
+                              widget.store.write(
+                                'ink.settings.music',
+                                v ? 'on' : 'off',
+                              ),
+                            );
+                            setState(() {});
+                          },
                         ),
-                        value: widget.sound.musicOn,
-                        onChanged: (v) {
-                          widget.sound.setMusic(v);
-                          unawaited(
-                            widget.store.write(
-                              'ink.settings.music',
-                              v ? 'on' : 'off',
-                            ),
-                          );
-                          setState(() {});
-                        },
                       ),
-                    ),
-                    SizedBox(
-                      width: 285 * f,
-                      child: SwitchListTile(
-                        title: Text(
-                          'Kalem ve dünya sesleri',
-                          style: TextStyle(fontSize: 14 * f),
+                      SizedBox(
+                        width: 285 * f,
+                        child: SwitchListTile(
+                          title: Text(
+                            'Kalem ve dünya sesleri',
+                            style: TextStyle(fontSize: 14 * f),
+                          ),
+                          value: widget.sound.effectsOn,
+                          onChanged: (v) {
+                            widget.sound.setEffects(v);
+                            unawaited(
+                              widget.store.write(
+                                'ink.settings.effects',
+                                v ? 'on' : 'off',
+                              ),
+                            );
+                            setState(() {});
+                          },
                         ),
-                        value: widget.sound.effectsOn,
-                        onChanged: (v) {
-                          widget.sound.setEffects(v);
-                          unawaited(
-                            widget.store.write(
-                              'ink.settings.effects',
-                              v ? 'on' : 'off',
-                            ),
-                          );
-                          setState(() {});
-                        },
                       ),
-                    ),
-                    _button('Geri', () => setState(() => _settings = false), f),
-                  ] else if (ready) ...[
-                    _button(
-                      s.phase == Phase.complete
-                          ? 'Yeniden başla'
-                          : widget.restored || s.x > 0
-                          ? 'Devam et'
-                          : 'Yolculuğa başla',
-                      _start,
-                      f,
-                    ),
-                    if (!s.lab)
                       _button(
-                        'Hikâyeyi izle',
-                        () => setState(() => _opening = true),
+                        'Geri',
+                        () => setState(() => _settings = false),
+                        f,
+                      ),
+                    ] else if (ready) ...[
+                      _button(
+                        s.phase == Phase.complete
+                            ? 'Yeniden başla'
+                            : widget.restored || s.x > 0
+                            ? 'Devam et'
+                            : 'Yolculuğa başla',
+                        _start,
+                        f,
+                      ),
+                      if (!s.lab)
+                        _button(
+                          'Hikâyeyi izle',
+                          () => setState(() => _opening = true),
+                          f,
+                          primary: false,
+                        ),
+                      _button(
+                        'Ses ayarları',
+                        () => setState(() => _settings = true),
                         f,
                         primary: false,
                       ),
-                    _button(
-                      'Ses ayarları',
-                      () => setState(() => _settings = true),
-                      f,
-                      primary: false,
-                    ),
-                  ] else if (dead) ...[
-                    _button('Bölümü yeniden dene', () {
-                      _retry();
-                      _start();
-                    }, f),
-                    Text(
-                      'Bu bölümün başlangıcından.',
-                      style: TextStyle(fontSize: 11 * f, color: muted),
-                    ),
-                  ] else if (complete) ...[
-                    _button('Tekrar oyna', () {
-                      if (s.levelIndex > 0) {
-                        s.levelIndex = 0;
-                        s.entryInk = 180;
-                        s.origin = 0;
-                      }
-                      _retry();
-                    }, f),
-                  ] else ...[
-                    _button('Devam et', _start, f),
-                    _button(
-                      'Ses ayarları',
-                      () => setState(() => _settings = true),
-                      f,
-                      primary: false,
-                    ),
-                    _button('Bölümü baştan başlat', _retry, f, primary: false),
+                    ] else if (dead) ...[
+                      _button('Bölümü yeniden dene', () {
+                        _retry();
+                        _start();
+                      }, f),
+                      Text(
+                        'Bu bölümün başlangıcından.',
+                        style: TextStyle(fontSize: 11 * f, color: muted),
+                      ),
+                    ] else if (complete) ...[
+                      _button('Tekrar oyna', () {
+                        if (s.levelIndex > 0) {
+                          s.levelIndex = 0;
+                          s.entryInk = 180;
+                          s.origin = 0;
+                        }
+                        _retry();
+                      }, f),
+                    ] else ...[
+                      _button('Devam et', _start, f),
+                      _button(
+                        'Ses ayarları',
+                        () => setState(() => _settings = true),
+                        f,
+                        primary: false,
+                      ),
+                      _button(
+                        'Bölümü baştan başlat',
+                        _retry,
+                        f,
+                        primary: false,
+                      ),
+                    ],
+                    if (ready && !_settings) ...[
+                      SizedBox(height: 12 * f),
+                      Text(
+                        'Dot kendi yürür. Sen ona bir yol çiz.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 13 * f, color: muted),
+                      ),
+                    ],
+                    if (!_settings && !ready && !dead)
+                      _button(
+                        'Ana Menüye Dön',
+                        _returnToMenu,
+                        f,
+                        primary: false,
+                      ),
                   ],
-                  if (ready && !_settings) ...[
-                    SizedBox(height: 12 * f),
-                    Text(
-                      'Dot kendi yürür. Sen ona bir yol çiz.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 13 * f, color: muted),
-                    ),
-                  ],
-                  if (!_settings && !ready && !dead)
-                    _button('Ana Menüye Dön', _returnToMenu, f, primary: false),
-                ],
                 ),
               ),
             ),
-
           ],
         ),
       ),

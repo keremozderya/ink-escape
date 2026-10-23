@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ink_escape/ink_game.dart';
 import 'package:ink_escape/presentation/paper_world.dart';
 
 Future<ui.Image> tile(Color color) async {
@@ -30,12 +31,12 @@ Future<int> alphaAt(PaperWorld world, double ground, int x, int y) async {
 
 void main() {
   testWidgets(
-    'Both parallax layers reach the ground when its position changes',
+    'Both scenery layers reach the ground when its position changes',
     (tester) async {
       await tester.runAsync(() async {
         final black = await tile(Colors.black);
         final world = PaperWorld(black, black, []);
-        for (final ground in [588.0, 650.0]) {
+        for (final ground in [588.0, 650.0, InkGame.baseline]) {
           expect(
             await alphaAt(world, ground, 210, ground.toInt() - 5),
             greaterThan(150),
@@ -51,7 +52,7 @@ void main() {
     await tester.runAsync(() async {
       final clear = await tile(Colors.transparent);
       final world = PaperWorld(clear, clear, [const PaperMemory(0, false)]);
-      for (final ground in [588.0, 650.0]) {
+      for (final ground in [588.0, 650.0, InkGame.baseline]) {
         expect(
           await alphaAt(world, ground, 210, ground.toInt() - 50),
           greaterThan(200),
@@ -73,7 +74,7 @@ void main() {
         final world = PaperWorld(clear, ruins, []);
         for (final camera in [0.0, 1350.0]) {
           final recorder = ui.PictureRecorder();
-          world.background(Canvas(recorder), camera);
+          world.background(Canvas(recorder), camera, groundY: InkGame.baseline);
           final picture = recorder.endRecording();
           final image = await picture.toImage(480, 853);
           final bytes = await image.toByteData(
@@ -81,7 +82,9 @@ void main() {
           );
           for (var x = 0; x < 480; x++) {
             expect(
-              bytes!.getUint8((587 * 480 + x) * 4 + 3),
+              bytes!.getUint8(
+                ((InkGame.baseline.toInt() - 1) * 480 + x) * 4 + 3,
+              ),
               greaterThan(5),
               reason: 'Floating footer at x=$x, camera=$camera',
             );

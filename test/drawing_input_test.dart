@@ -13,6 +13,9 @@ import 'package:ink_escape/soundscape.dart';
 void main() {
   for (final config in [
     ('phone touch', const Size(390, 844), PointerDeviceKind.touch),
+    ('landscape phone', const Size(844, 390), PointerDeviceKind.touch),
+    ('landscape tablet', const Size(1024, 768), PointerDeviceKind.touch),
+    ('wide window', const Size(1280, 540), PointerDeviceKind.mouse),
     ('desktop mouse', const Size(1280, 800), PointerDeviceKind.mouse),
   ]) {
     testWidgets(
@@ -57,6 +60,12 @@ void main() {
         await tester.tap(find.text('Hikâyeyi atla'));
         await tester.pump();
         final state = tester.state<GameScreenState>(find.byType(GameScreen));
+        expect(
+          tester.getRect(find.byKey(const ValueKey('ink-drawing-surface'))),
+          Offset.zero & config.$2,
+          reason:
+              'The game must fill the available viewport without letterboxing',
+        );
         s.advance(128 / s.walkSpeed);
         state.game.cameraX = s.x - 96;
         await tester.pump();

@@ -21,13 +21,17 @@ class InkGame extends FlameGame {
   double cameraX = -96, visualTime = 0, deadAge = 0, _uiTime = 0;
   double _origin = 0;
   double _landAt = -10;
+  double _lastWalked = 0, _gaitDistance = 0, _movement = 0, _groundAngle = 0;
   double? _gateAt;
   final Map<String, double> _lineBorn = {};
   final List<InkPickupFlight> _flights = [];
   final List<InkParticle> particles = [];
   Level? _nextLevel;
   int _shownIndex = -1;
-  static const double worldWidth = 480, worldHeight = 853.333, baseline = 588;
+  static const double worldWidth = 480,
+      worldHeight = 853.333,
+      groundInset = 64,
+      baseline = worldHeight - groundInset;
   double get scale => size.y / worldHeight;
   double get visibleWidth => size.x / scale;
   bool get deathEffectComplete => deadAge >= InkDeathPose.duration;
@@ -64,6 +68,7 @@ class InkGame extends FlameGame {
       _gateAt = -1;
     }
     sceneReady = true;
+    _resetGait();
     session.onEvent = effect;
     onFrame?.call();
   }
@@ -77,9 +82,17 @@ class InkGame extends FlameGame {
     _flights.clear();
     visualTime = 0;
     deadAge = 0;
+    _resetGait();
     _landAt = -10;
     particles.clear();
     _cacheNext();
+  }
+
+  void _resetGait() {
+    _lastWalked = session.walked;
+    _gaitDistance = session.walked;
+    _movement = 0;
+    _groundAngle = math.atan(session.groundSlope);
   }
 
   void _cacheNext() {
@@ -146,6 +159,17 @@ class InkGame extends FlameGame {
     final step = math.max(0.0, dt);
     if (session.phase == Phase.playing) {
       session.advance(step);
+      final moved = math.max(0.0, session.walked - _lastWalked);
+      _lastWalked = session.walked;
+      final blend = 1 - math.exp(-14 * step);
+      final targetAngle = session.grounded
+          ? math.atan(session.groundSlope)
+          : 0.0;
+      _groundAngle += (targetAngle - _groundAngle) * blend;
+      final stride = InkGroundPose.strideForAngle(_groundAngle);
+      _gaitDistance += moved / stride;
+      final moving = moved > 1e-7 && session.grounded ? 1.0 : 0.0;
+      _movement += (moving - _movement) * blend;
       visualTime += step;
       cameraX += (session.x - 96 - cameraX) * (1 - math.exp(-10 * step));
       for (final p in particles) {
@@ -181,7 +205,12 @@ class InkGame extends FlameGame {
       Rect.fromLTWH(0, 0, visibleWidth, worldHeight),
       Paint()..color = const Color(0xfff5f0e4),
     );
-    paperWorld.background(canvas, cameraX + session.origin, width: visibleWidth, groundY: baseline);
+    paperWorld.background(
+      canvas,
+      cameraX + session.origin,
+      width: visibleWidth,
+      groundY: baseline,
+    );
     _cacheNext();
     // Distant pencil stems; they never act as collision surfaces.
     for (final s in session.level.terrain) {
@@ -295,14 +324,15 @@ class InkGame extends FlameGame {
             )
           : 0.0;
       if (t < 1) {
-        _prop(canvas, 4, point(V(g.x, 0)), 90, 112, bottom: .94, alpha: 1 - t);
+        _groundProp(canvas, 4, point(V(g.x, 0)), 90, 112, alpha: 1 - t);
       }
       if (t > 0) {
-        _prop(canvas, 5, point(V(g.x, 0)), 90, 112, bottom: .94, alpha: t);
+        _groundProp(canvas, 5, point(V(g.x, 0)), 90, 112, alpha: t);
       }
     }
     for (final p in session.level.pickups) {
-      if (session.collected.contains(p.id) || (p.p.x - cameraX < -120 || p.p.x - cameraX > visibleWidth + 120)) {
+      if (session.collected.contains(p.id) ||
+          (p.p.x - cameraX < -120 || p.p.x - cameraX > visibleWidth + 120)) {
         continue;
       }
       _prop(
@@ -433,7 +463,12 @@ class InkGame extends FlameGame {
     }
     _firstDrawHint(canvas);
     _dot(canvas);
-    paperWorld.foreground(canvas, cameraX + session.origin, width: visibleWidth);
+    paperWorld.foreground(
+      canvas,
+      cameraX + session.origin,
+      width: visibleWidth,
+      groundY: baseline,
+    );
     if (session.phase == Phase.resumeStroke && draft != null) {
       final q = point(draft.points.last);
       canvas.drawCircle(
@@ -522,7 +557,7 @@ class InkGame extends FlameGame {
         if (xx - cameraX < -80 || xx - cameraX > visibleWidth + 80) {
           continue;
         }
-        _prop(c, 6, point(V(xx, s.yAt(xx))), 65, 63, bottom: .94);
+        _groundProp(c, 6, point(V(xx, s.yAt(xx))), 65, 63);
       }
     }
   }
@@ -604,37 +639,33 @@ class InkGame extends FlameGame {
     }
     final walking =
         (session.phase == Phase.playing || dead) && session.grounded;
-    var floorSlope = 0.0;
-    if (session.grounded) {
-      for (final surface in session.level.terrain) {
-        if (surface.contains(session.x) &&
-            (surface.yAt(session.x) - session.y).abs() < 1.5) {
-          floorSlope = surface.slope;
-        }
-      }
-      for (final line in session.solidLines) {
-        final y = line.yAt(session.x);
-        if (y != null && (y - session.y).abs() < 1.5) {
-          floorSlope = line.slopeAt(session.x);
-        }
-      }
-    }
-    // A tiny near-vertical step is climbable, but its tangent must not stretch
-    // the walking legs across the screen while Dot steps up it.
-    floorSlope = floorSlope
-        .clamp(-InkSession.maxClimbSlope, InkSession.maxClimbSlope)
-        .toDouble();
     final pose = InkWalkPose.sample(
-      session.walked,
+      _gaitDistance,
       grounded: session.grounded,
       walking: walking,
       time: visualTime,
+      movement: _movement,
+    );
+    final sampleGround = session.groundSampler();
+    final feet = InkGroundPose.place(
+      pose,
+      grounded: session.grounded,
+      angle: _groundAngle,
+      stride: InkGroundPose.strideForAngle(_groundAngle),
+      sampleGround: (distance) {
+        final at = sampleGround(distance);
+        return at == null ? null : (at.x - session.x, at.y - session.y);
+      },
     );
     final sw = dot.width / 4, sh = dot.height / 2;
     final src = Rect.fromLTWH(0, 0, sw, sh);
     if (dead) {
       c.saveLayer(
-        Rect.fromCenter(center: q - const Offset(0, 25), width: 90, height: 100),
+        Rect.fromCenter(
+          center: q - const Offset(0, 25),
+          width: 90,
+          height: 100,
+        ),
         Paint()..color = Color.fromRGBO(255, 255, 255, death.bodyOpacity),
       );
       c.translate(0, -death.bodyLift);
@@ -651,12 +682,17 @@ class InkGame extends FlameGame {
     );
     c.save();
     c.translate(q.dx, q.dy);
-    void foot(InkFootPose p, double hip, bool front) {
-      final x = p.x + hip * .18;
-      final y = -p.lift - x * floorSlope;
+    void foot(
+      InkFootPose p,
+      InkFootPlacement placement,
+      double hip,
+      bool front,
+    ) {
+      final x = placement.x, y = placement.y;
+      final hipY = -9 - pose.rise - feet.bodyLift;
       final path = Path()
-        ..moveTo(hip, -9 - pose.rise * .45)
-        ..cubicTo(hip - 1, -4.8, x - 2, y - 4, x, y - 1.2);
+        ..moveTo(hip, hipY)
+        ..cubicTo(hip - 1, hipY + (y - hipY) * .55, x - 2, y - 4, x, y - 1.2);
       c.drawPath(
         path,
         Paint()
@@ -665,28 +701,32 @@ class InkGame extends FlameGame {
           ..strokeWidth = 3.7
           ..strokeCap = StrokeCap.round,
       );
+      c.save();
+      c.translate(x, y);
+      c.rotate(placement.angle);
       c.drawOval(
         Rect.fromCenter(
-          center: Offset(x + 1.6, y - 1),
+          center: const Offset(1.6, -1),
           width: p.planted ? 8.5 : 7.2,
           height: 3.1,
         ),
         Paint()..color = const Color(0xff27231f),
       );
       c.drawLine(
-        Offset(x - 1, y - 2),
-        Offset(x + 2.3, y - 2.1),
+        const Offset(-1, -2),
+        const Offset(2.3, -2.1),
         Paint()
           ..color = const Color(0x886b6256)
           ..strokeWidth = .55
           ..strokeCap = StrokeCap.round,
       );
+      c.restore();
     }
 
-    foot(pose.back, -5, false);
+    foot(pose.back, feet.back, -5, false);
     c.save();
-    c.translate(0, -pose.rise);
-    c.rotate(pose.lean);
+    c.translate(0, -pose.rise - feet.bodyLift);
+    c.rotate(pose.lean + (session.grounded ? _groundAngle * .12 : 0));
     final landing = ((visualTime - _landAt) / .28).clamp(0.0, 1.0);
     final impact = math.sin(landing * math.pi) * .10;
     final falling = session.grounded
@@ -719,7 +759,7 @@ class InkGame extends FlameGame {
       }
     }
     c.restore();
-    foot(pose.front, 5, true);
+    foot(pose.front, feet.front, 5, true);
     c.restore();
     if (dead) {
       c.restore();
@@ -740,7 +780,9 @@ class InkGame extends FlameGame {
         ..close();
       c.drawPath(
         stain,
-        Paint()..color = const Color(0xff38312a).withValues(alpha: pose.stainOpacity),
+        Paint()
+          ..color = const Color(0xff38312a)
+              .withValues(alpha: pose.stainOpacity),
       );
     }
     c.drawOval(
@@ -765,16 +807,49 @@ class InkGame extends FlameGame {
       );
       c.drawOval(
         shape,
-        Paint()..color = const Color(0xff302b26).withValues(alpha: drop.opacity),
+        Paint()
+          ..color = const Color(0xff302b26).withValues(alpha: drop.opacity),
       );
       c.drawOval(
-        Rect.fromLTWH(shape.left + drop.radius * .4, shape.top + .3,
-            drop.radius, drop.radius * .35),
-        Paint()..color = const Color(0xffa9987b).withValues(alpha: drop.opacity * .28),
+        Rect.fromLTWH(
+          shape.left + drop.radius * .4,
+          shape.top + .3,
+          drop.radius,
+          drop.radius * .35,
+        ),
+        Paint()
+          ..color = const Color(0xffa9987b)
+              .withValues(alpha: drop.opacity * .28),
       );
       c.restore();
     }
     c.restore();
+  }
+
+  void _groundProp(
+    Canvas c,
+    int index,
+    Offset ground,
+    double w,
+    double h, {
+    double alpha = 1,
+  }) {
+    // Visible feet within each atlas cell, excluding transparent bottom padding.
+    final foot = switch (index) {
+      4 => 372.5,
+      5 => 374.5,
+      6 => 373.5,
+      _ => throw ArgumentError.value(index, 'index', 'Not a grounded prop'),
+    };
+    _prop(
+      c,
+      index,
+      ground + const Offset(0, 1),
+      w,
+      h,
+      bottom: foot / (props.height / 2),
+      alpha: alpha,
+    );
   }
 
   void _prop(

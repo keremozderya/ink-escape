@@ -14,9 +14,9 @@ import 'package:ink_escape/soundscape.dart';
 
 void main() {
   testWidgets(
-    'Portrait renders actual art; pause freezes world and ignores drawing',
+    'Landscape renders actual art; pause freezes world and ignores drawing',
     (tester) async {
-      tester.view.physicalSize = const Size(480, 853.333);
+      tester.view.physicalSize = const Size(960, 540);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -126,7 +126,7 @@ void main() {
       final savedCamera = state.game.cameraX;
       state.game.cameraX = (data.first['memories'][0]['x'] as num).toDouble();
       await tester.pump();
-      await capture('05-note-parallax');
+      await capture('05-note-grounded');
       state.game.cameraX = savedCamera;
       await tester.pump();
       await tester.tap(find.byTooltip('Duraklat'));

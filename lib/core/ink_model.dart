@@ -260,6 +260,17 @@ class Draft {
   V? get end => points.isEmpty ? null : points.last;
 }
 
+/// A nonvertical floor segment, ordered in Dot's direction of travel.
+class _GroundSegment {
+  _GroundSegment(this.a, this.b, this.natural);
+  final V a, b;
+  final bool natural;
+  double get slope => (b.y - a.y) / (b.x - a.x);
+  double get lengthPerX => math.sqrt(1 + slope * slope);
+  double yAt(double xx) => a.y + (xx - a.x) * slope;
+  bool contains(double xx) => xx >= a.x - 1e-6 && xx <= b.x + 1e-6;
+}
+
 /// One continuous uphill section. Its total rise, rather than each tiny
 /// sampled segment, determines whether it is a small step or a tall wall.
 class _ClimbRun {
@@ -277,9 +288,10 @@ class _ClimbRun {
       final a = points[i - 1], b = points[i], ab = b - a;
       final length = ab.length;
       if (length <= 1e-7) continue;
-      final t = (((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) /
-              (length * length))
-          .clamp(0.0, 1.0);
+      final t =
+          (((point.x - a.x) * ab.x + (point.y - a.y) * ab.y) /
+                  (length * length))
+              .clamp(0.0, 1.0);
       final error = (a + ab * t).distance(point);
       if (error <= closest) {
         closest = error;
@@ -486,6 +498,7 @@ class InkSession {
     if (phase != Phase.playing || _stuckElapsed < .15) return null;
     return (stuckLimit - _stuckElapsed).ceil().clamp(1, 3);
   }
+
   Iterable<InkLine> get solidLines => lines.where((l) => !l.retired);
   void _loadLevel() {
     level = Level.from(levelData[levelIndex]);
@@ -723,7 +736,10 @@ class InkSession {
         ink = math.min(240.0, ink + 10 * worldDt);
       }
       for (final r in level.hazards) {
-        if (x + 12 > r[0] && x - 12 < r[2] && y + dotHeight > r[1] && y < r[3]) {
+        if (x + 12 > r[0] &&
+            x - 12 < r[2] &&
+            y + dotHeight > r[1] &&
+            y < r[3]) {
           die('Gövden için biraz daha açıklık bırak.');
         }
       }
@@ -740,83 +756,186 @@ class InkSession {
     }
   }
 
-  (double, bool, double)? _support(
-    double xx,
-    double expected,
-    double tolerance,
-  ) {
-    (double, bool, double)? best;
-    void consider(double yy, bool natural, double slope) {
-      if ((yy - expected).abs() <= tolerance &&
-          (best == null || yy > best!.$1 + .001)) {
-        best = (yy, natural, slope);
-      }
-    }
-
+  List<_GroundSegment> get _groundSegments {
+    final segments = <_GroundSegment>[];
     for (final s in level.terrain) {
-      if (s.contains(xx)) {
-        consider(s.yAt(xx), true, s.slope);
+      if (s.b.x - s.a.x > 1e-7) {
+        segments.add(_GroundSegment(s.a, s.b, true));
       }
     }
-    for (final l in solidLines) {
-      for (final hit in l.crossingsAt(xx)) {
-        consider(hit.$1, false, hit.$2);
+    for (final line in solidLines) {
+      for (var i = 1; i < line.points.length; i++) {
+        var a = line.points[i - 1], b = line.points[i];
+        if ((b.x - a.x).abs() <= 1e-7) continue;
+        if (a.x > b.x) {
+          final swap = a;
+          a = b;
+          b = swap;
+        }
+        segments.add(_GroundSegment(a, b, false));
+      }
+    }
+    return segments;
+  }
+
+  _GroundSegment? _support(
+    List<_GroundSegment> segments,
+    V at, {
+    double direction = 1,
+  }) {
+    _GroundSegment? best;
+    var error = .75;
+    for (final segment in segments) {
+      if (!segment.contains(at.x)) continue;
+      final delta = (segment.yAt(at.x) - at.y).abs();
+      if (delta > error + 1e-7) continue;
+      final continues = direction > 0
+          ? segment.b.x > at.x + 1e-7
+          : segment.a.x < at.x - 1e-7;
+      final bestContinues =
+          best != null &&
+          (direction > 0 ? best.b.x > at.x + 1e-7 : best.a.x < at.x - 1e-7);
+      if (best == null ||
+          delta < error - 1e-7 ||
+          (delta <= error + 1e-7 &&
+              (continues && !bestContinues ||
+                  continues == bestContinues &&
+                      segment.slope * direction > best.slope * direction))) {
+        best = segment;
+        error = delta;
       }
     }
     return best;
   }
 
+  double _junctionX(
+    List<_GroundSegment> segments,
+    _GroundSegment floor,
+    double fromX,
+    double direction,
+  ) {
+    var end = direction > 0 ? floor.b.x : floor.a.x;
+    for (final other in segments) {
+      final difference = other.slope - floor.slope;
+      if (difference.abs() < 1e-9) continue;
+      final cross =
+          (floor.a.y -
+              floor.slope * floor.a.x -
+              other.a.y +
+              other.slope * other.a.x) /
+          difference;
+      if ((cross - fromX) * direction > 1e-7 &&
+          (end - cross) * direction > 1e-7 &&
+          other.contains(cross)) {
+        end = cross;
+      }
+    }
+    return end;
+  }
+
+  /// Sample the same connected contour that supports Dot, including corners.
+  /// Nearby overhead lines and unconnected platforms cannot move his feet.
+  V? groundPointAt(double distance) => groundSampler()(distance);
+
+  /// Reuse one geometry snapshot for all foot samples in a rendered frame.
+  V? Function(double) groundSampler() {
+    if (!grounded) return (_) => null;
+    final segments = _groundSegments;
+    final origin = V(x, y);
+    return (distance) {
+      final direction = distance < 0 ? -1.0 : 1.0;
+      var point = origin, remaining = distance.abs();
+      for (var i = 0; i < segments.length * 2 + 2; i++) {
+        final floor = _support(segments, point, direction: direction);
+        if (floor == null) return null;
+        final end = _junctionX(segments, floor, point.x, direction);
+        final available = (end - point.x).abs() * floor.lengthPerX;
+        if (remaining <= available + 1e-7) {
+          final xx = point.x + direction * remaining / floor.lengthPerX;
+          return V(xx, floor.yAt(xx));
+        }
+        if (available <= 1e-7) return null;
+        point = V(end, floor.yAt(end));
+        remaining -= available;
+      }
+      return null;
+    };
+  }
+
+  double get groundSlope =>
+      grounded ? _support(_groundSegments, V(x, y))?.slope ?? 0 : 0;
+
   void _walk(double dt) {
     final climbs = _climbRuns.toList();
-    if (grounded) {
-      if (_climbSmallStep(walkSpeed * dt, climbs)) return;
-      final old = _support(x, y, 1.2);
-      final slope = old?.$3 ?? 0;
-      if (slope > maxClimbSlope + 1e-6) return;
-      final dx = walkSpeed * dt / math.sqrt(1 + slope * slope);
-      if (_blockedAhead(x + dx, y, climbs)) return;
-      final next = _support(x + dx, y, 1.2);
-      if (next != null) {
-        if (next.$3 > maxClimbSlope + 1e-6) return;
-        _walkTo(V(x + dx, next.$1), next.$2);
-        return;
+    final segments = _groundSegments;
+    var remaining = dt;
+    // Consume distance up to each real corner before choosing the next floor.
+    // Comparing the next height with the old height loses steep downslopes.
+    for (
+      var i = 0;
+      grounded && remaining > 1e-9 && i < segments.length * 2 + 2;
+      i++
+    ) {
+      if (_climbSmallStep(walkSpeed * remaining, climbs)) return;
+      final floor = _support(segments, V(x, y));
+      if (floor != null) {
+        if (floor.slope > maxClimbSlope + 1e-6) return;
+        final end = _junctionX(segments, floor, x, 1);
+        final dx = math.min(
+          walkSpeed * remaining / floor.lengthPerX,
+          math.max(0.0, end - x),
+        );
+        if (_blockedAhead(x + dx, y, climbs)) return;
+        if (dx > 1e-7) {
+          final target = V(x + dx, floor.yAt(x + dx));
+          final duration = target.distance(V(x, y)) / walkSpeed;
+          _walkTo(target, floor.natural);
+          remaining = math.max(0.0, remaining - duration);
+          continue;
+        }
       }
       grounded = false;
       onNatural = false;
       vy = 0;
     }
-    final previousY = y;
-    final nextX = x + walkSpeed * dt;
-    if (!_blockedAhead(nextX, y, climbs)) x = nextX;
-    vy -= 160 * dt;
-    y += vy * dt;
-    double? landing;
-    bool natural = true;
-    void check(double yy, bool isNatural) {
-      if (previousY >= yy - .001 &&
-          y <= yy &&
-          (landing == null || yy > landing!)) {
-        landing = yy;
-        natural = isNatural;
+    if (grounded || remaining <= 1e-9) return;
+    final previous = V(x, y);
+    final nextX = x + walkSpeed * remaining;
+    vy -= 160 * remaining;
+    final next = V(
+      _blockedAhead(nextX, y, climbs) ? x : nextX,
+      y + vy * remaining,
+    );
+    _GroundSegment? landing;
+    var firstHit = double.infinity;
+    for (final floor in segments) {
+      // Intersect the entire moving foot path with the floor, rather than
+      // testing only its final X. Rising banks and thin ledges need this sweep.
+      final before = previous.y - floor.yAt(previous.x);
+      final after = next.y - floor.yAt(next.x);
+      if (before < -1e-7 || after > 1e-7 || before - after <= 1e-9) continue;
+      final t = (before / (before - after)).clamp(0.0, 1.0);
+      final xx = previous.x + (next.x - previous.x) * t;
+      if (!floor.contains(xx)) continue;
+      // Leaving a free endpoint is a real fall, not another landing at t=0.
+      if (t <= 1e-7 && next.x > previous.x && floor.b.x <= previous.x + 1e-7) {
+        continue;
       }
-    }
-
-    for (final s in level.terrain) {
-      if (s.contains(x)) {
-        check(s.yAt(x), true);
-      }
-    }
-    for (final l in solidLines) {
-      for (final hit in l.crossingsAt(x)) {
-        check(hit.$1, false);
+      if (t < firstHit) {
+        firstHit = t;
+        landing = floor;
       }
     }
     if (landing != null) {
-      y = landing!;
+      x = previous.x + (next.x - previous.x) * firstHit;
+      y = landing.yAt(x);
       vy = 0;
       grounded = true;
-      onNatural = natural;
+      onNatural = landing.natural;
       emit('land');
+    } else {
+      x = next.x;
+      y = next.y;
     }
   }
 
@@ -831,7 +950,10 @@ class InkSession {
     if ((walked / 20).floor() > (oldWalk / 20).floor()) emit('step');
   }
 
-  Iterable<_ClimbRun> _groupClimbs(Iterable<(V, V)> segments, bool natural) sync* {
+  Iterable<_ClimbRun> _groupClimbs(
+    Iterable<(V, V)> segments,
+    bool natural,
+  ) sync* {
     List<V>? run;
     for (final segment in segments) {
       var a = segment.$1, b = segment.$2;
@@ -841,7 +963,8 @@ class InkSession {
         b = swap;
       }
       final dx = b.x - a.x;
-      final steep = b.y > a.y + 1e-7 &&
+      final steep =
+          b.y > a.y + 1e-7 &&
           (dx.abs() <= 1e-7 || (b.y - a.y) / dx > maxClimbSlope + 1e-6);
       if (!steep) {
         if (run != null) yield _ClimbRun(run, natural);

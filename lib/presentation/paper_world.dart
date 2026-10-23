@@ -4,12 +4,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 /// Absolute world coordinates survive level-local origin rebasing and saves.
-class PaperParallax {
-  static const far = .10, ruins = .32, memories = .58, foreground = 1.12;
-  static double screenX(double worldX, double camera, double factor) =>
-      worldX - camera * factor;
-  static double tileStart(double camera, double factor, double width) =>
-      -(camera * factor % width);
+class PaperScene {
+  static double screenX(double worldX, double camera) => worldX - camera;
+  static double tileStart(double camera, double width) => -(camera % width);
 }
 
 class PaperMemory {
@@ -28,14 +25,16 @@ class PaperWorld {
     Canvas c,
     ui.Image image,
     double camera,
-    double factor,
     double height,
     double top,
     double alpha,
-    double viewportWidth,
-  ) {
+    double viewportWidth, {
+    double fadeTop = 0,
+  }) {
     final width = image.width / image.height * height;
-    final start = PaperParallax.tileStart(camera, factor, width);
+    final start = PaperScene.tileStart(camera, width);
+    final bounds = Rect.fromLTWH(0, top, viewportWidth, height);
+    if (fadeTop > 0) c.saveLayer(bounds, Paint());
     for (var x = start - width; x < viewportWidth; x += width) {
       c.drawImageRect(
         image,
@@ -46,29 +45,42 @@ class PaperWorld {
           ..filterQuality = FilterQuality.medium,
       );
     }
+    if (fadeTop > 0) {
+      // Blend the texture into the blank paper when the ground moves down.
+      c.drawRect(
+        bounds,
+        Paint()
+          ..blendMode = BlendMode.dstIn
+          ..shader = ui.Gradient.linear(
+            Offset(0, top),
+            Offset(0, top + fadeTop),
+            [Colors.transparent, Colors.white],
+          ),
+      );
+      c.restore();
+    }
   }
 
-  void background(Canvas c, double camera, {double width = 480, double groundY = 588}) {
+  void background(
+    Canvas c,
+    double camera, {
+    double width = 480,
+    double groundY = 588,
+  }) {
     // Bury the image footers behind the physical paper. The ruins have an
     // irregular transparent lower edge, which needs a deeper overlap.
-    _tile(c, garden, camera, PaperParallax.far, 570, groundY - 570 + 12, .25, width);
+    _tile(c, garden, camera, 570, groundY - 570 + 12, .25, width, fadeTop: 90);
     // Low contrast, separate silhouette: discarded drawings have depth.
-    _tile(c, ruins, camera, PaperParallax.ruins, 288, groundY - 288 + 96, .52, width);
+    _tile(c, ruins, camera, 288, groundY - 288 + 96, .52, width);
     for (final memory in memories) {
       // Authored positions are camera encounter positions, not repeating tiles.
-      final x =
-          210 +
-          PaperParallax.screenX(
-            memory.worldX * PaperParallax.memories,
-            camera,
-            PaperParallax.memories,
-          );
+      final x = PaperScene.screenX(memory.worldX + 210, camera);
       if (x < -240 || x > width + 210) continue;
       _memory(c, x, memory.letter, groundY);
     }
     // Folded, torn scraps behind the physical route. Never colliders.
     const spacing = 370.0;
-    final start = PaperParallax.tileStart(camera, .76, spacing);
+    final start = PaperScene.tileStart(camera, spacing);
     c.save();
     c.translate(0, groundY - 588);
     for (var x = start - spacing; x < width + 120; x += spacing) {
@@ -112,9 +124,10 @@ class PaperWorld {
   void _memory(Canvas c, double x, bool letter, double groundY) {
     c.save();
     final angle = letter ? .08 : -.09;
-    final foot = [const Offset(90, 63), const Offset(48, 66), const Offset(-90, 58)]
-        .map((p) => p.dx * math.sin(angle) + p.dy * math.cos(angle))
-        .reduce(math.max);
+    final foot =
+        [const Offset(90, 63), const Offset(48, 66), const Offset(-90, 58)]
+            .map((p) => p.dx * math.sin(angle) + p.dy * math.cos(angle))
+            .reduce(math.max);
     // Anchor the lowest rotated corner to the same ground as the scenery.
     c.translate(x, groundY + 6 - foot);
     c.rotate(angle);
@@ -190,14 +203,17 @@ class PaperWorld {
     c.restore();
   }
 
-  void foreground(Canvas c, double camera, {double width = 480}) {
-    // Restricted to the bottom margin, clear of every gameplay contact.
+  void foreground(
+    Canvas c,
+    double camera, {
+    double width = 480,
+    double groundY = 588,
+  }) {
+    // Paper folds sit below the route and move with the same world coordinates.
     const tileWidth = 640.0;
-    final start = PaperParallax.tileStart(
-      camera,
-      PaperParallax.foreground,
-      tileWidth,
-    );
+    final start = PaperScene.tileStart(camera, tileWidth);
+    c.save();
+    c.translate(0, groundY - 736);
     for (var x = start - tileWidth; x < width + 80; x += tileWidth) {
       final p = Path()
         ..moveTo(x - 30, 854)
@@ -226,5 +242,6 @@ class PaperWorld {
         );
       }
     }
+    c.restore();
   }
 }

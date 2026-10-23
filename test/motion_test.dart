@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:math' as math;
 import 'package:ink_escape/presentation/ink_motion.dart';
 
 void main() {
@@ -21,18 +22,72 @@ void main() {
       expect((a.height - b.height).abs(), lessThan(.001));
     }
   });
-  test('Foot alternates grounded contact every 20 distance units; idle has no sliding', () {
-    for (var i = 0; i < 100; i++) {
-      final p = InkWalkPose.sample(i * .4, grounded: true, walking: true);
-      expect(p.front.lift, greaterThanOrEqualTo(0));
-      expect(p.back.lift, greaterThanOrEqualTo(0));
-      expect(p.front.planted != p.back.planted, isTrue);
-      expect(p.front.planted ? p.front.lift : p.back.lift, 0);
+  test(
+    'Foot alternates grounded contact every 20 distance units; idle has no sliding',
+    () {
+      for (var i = 0; i < 100; i++) {
+        final p = InkWalkPose.sample(i * .4, grounded: true, walking: true);
+        expect(p.front.lift, greaterThanOrEqualTo(0));
+        expect(p.back.lift, greaterThanOrEqualTo(0));
+        expect(p.front.planted != p.back.planted, isTrue);
+        expect(p.front.planted ? p.front.lift : p.back.lift, 0);
+      }
+      final a = InkWalkPose.sample(4, grounded: true, walking: false, time: 0);
+      final b = InkWalkPose.sample(4, grounded: true, walking: false, time: 5);
+      expect(a.front.x, b.front.x);
+      expect(a.front.lift, 0);
+      expect(b.front.lift, 0);
+    },
+  );
+
+  test(
+    'Steep terrain keeps feet and hips within reach without inverted legs',
+    () {
+      for (final degrees in [-89.0, -55.0, 0.0, 55.0, 89.0]) {
+        final angle = degrees * math.pi / 180;
+        final stride = InkGroundPose.strideForAngle(angle);
+        expect(stride, inInclusiveRange(.45, 1));
+        for (var i = 0; i < 160; i++) {
+          final walk = InkWalkPose.sample(i / 4, grounded: true, walking: true);
+          final feet = InkGroundPose.place(
+            walk,
+            grounded: true,
+            angle: angle,
+            stride: stride,
+            sampleGround: (d) => (d * math.cos(angle), d * math.sin(angle)),
+          );
+          final hipY = -9 - walk.rise - feet.bodyLift;
+          for (final foot in [feet.back, feet.front]) {
+            expect(foot.y - hipY, inInclusiveRange(2.9, 22));
+            expect(foot.x.abs(), lessThan(12));
+            expect(foot.angle.isFinite, isTrue);
+          }
+        }
+      }
+    },
+  );
+
+  test('A stopped gait settles into idle instead of marching in place', () {
+    final idle = InkWalkPose.sample(13, grounded: true, walking: false);
+    final stopped = InkWalkPose.sample(
+      13,
+      grounded: true,
+      walking: true,
+      movement: 0,
+    );
+    expect(stopped.front.x, idle.front.x);
+    expect(stopped.back.x, idle.back.x);
+    expect(stopped.front.lift, 0);
+    expect(stopped.back.lift, 0);
+    for (final weight in [.0, .2, .5, .8, 1.0]) {
+      final pose = InkWalkPose.sample(
+        13,
+        grounded: true,
+        walking: true,
+        movement: weight,
+      );
+      expect(pose.front.lift, greaterThanOrEqualTo(0));
+      expect(pose.back.lift, greaterThanOrEqualTo(0));
     }
-    final a = InkWalkPose.sample(4, grounded: true, walking: false, time: 0);
-    final b = InkWalkPose.sample(4, grounded: true, walking: false, time: 5);
-    expect(a.front.x, b.front.x);
-    expect(a.front.lift, 0);
-    expect(b.front.lift, 0);
   });
 }

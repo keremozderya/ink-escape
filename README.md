@@ -22,7 +22,7 @@ Doğrulama ortamı: Flutter 3.47.7, Dart 3.13.5. Android/iOS cihaz testi yapılm
 
 ## İçerik
 
-Yenilenmiş karakter animasyonu, yürüyüşe bağlı parallax çevre, seyrek ders notu/mektup ayrıntıları ve atlanabilir 37 saniyelik açılış animatiği. Mevcut iki oynanabilir bölüm yaklaşık 2,5 dakika sürer. Üç mekanik laboratuvarı geliştirme parametresiyle açılır. 300 bölümün tamamı bu pakette yoktur.
+Yenilenmiş karakter animasyonu, zeminle aynı hızda kayan ve zemine oturan çevre çizimleri, seyrek ders notu/mektup ayrıntıları ve atlanabilir 37 saniyelik açılış animatiği. Yatay oyun alanı pencereyi doldurur; zemin ekranın alt kenarına yakındır. Mevcut iki oynanabilir bölüm yaklaşık 2,5 dakika sürer. Üç mekanik laboratuvarı geliştirme parametresiyle açılır. 300 bölümün tamamı bu pakette yoktur.
 
 Eski sürümün kayıtlarında tamamlanan bölümler korunur; değişen parkur nedeniyle mevcut bölüm başlangıcından devam edilir. Yeni sürüm kendi 5 saniyelik kayıt konumundan devam eder.
 

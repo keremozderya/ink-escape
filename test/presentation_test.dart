@@ -8,33 +8,19 @@ import 'package:ink_escape/presentation/opening_story.dart';
 import 'package:ink_escape/presentation/paper_world.dart';
 
 void main() {
-  test(
-    'Parallax survives level rebasing and uses independent layer speeds',
-    () {
-      const localCamera = 12.0, origin = 7800.0, worldObject = 3000.0;
-      for (final factor in [
-        PaperParallax.far,
-        PaperParallax.ruins,
-        PaperParallax.memories,
-        PaperParallax.foreground,
-      ]) {
-        final before = PaperParallax.screenX(worldObject, 7812, factor);
-        final after = PaperParallax.screenX(
-          worldObject,
-          localCamera + origin,
-          factor,
-        );
-        expect(before, after);
-        final moved = PaperParallax.screenX(worldObject, 7912, factor);
-        expect(before - moved, closeTo(100 * factor, 1e-8));
-        for (final camera in [-96.0, 0.0, 7800.0, 1000000.0]) {
-          final start = PaperParallax.tileStart(camera, factor, 640);
-          expect(start, inInclusiveRange(-640, 0));
-          expect(start + 640, greaterThanOrEqualTo(0));
-        }
-      }
-    },
-  );
+  test('Scenery follows terrain one-to-one and survives level rebasing', () {
+    const localCamera = 12.0, origin = 7800.0, worldObject = 3000.0;
+    final before = PaperScene.screenX(worldObject, 7812);
+    final after = PaperScene.screenX(worldObject, localCamera + origin);
+    expect(before, after);
+    final moved = PaperScene.screenX(worldObject, 7912);
+    expect(before - moved, closeTo(100, 1e-8));
+    for (final camera in [-96.0, 0.0, 7800.0, 1000000.0]) {
+      final start = PaperScene.tileStart(camera, 640);
+      expect(start, inInclusiveRange(-640, 0));
+      expect(start + 640, greaterThanOrEqualTo(0));
+    }
+  });
   test('Planted foot stays at same world point while body advances', () {
     for (final d in [1.0, 8.0, 14.0]) {
       final a = InkWalkPose.sample(d, grounded: true, walking: true);
