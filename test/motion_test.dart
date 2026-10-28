@@ -1,8 +1,26 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'dart:math' as math;
 import 'package:ink_escape/presentation/ink_motion.dart';
+import 'package:ink_escape/core/ink_model.dart';
 
 void main() {
+  test('Feet follow a short vertical step instead of sampling flat air', () {
+    final s = InkSession([
+      {'number': 1, 'title': 'Step', 'width': 2000, 'cells': []},
+    ])..start();
+    s.level.terrain.add(Surface('approach', const V(0, 0), const V(100, 0)));
+    s.lines.add(
+      InkLine('step', [const V(100, 0), const V(100, 24), const V(160, 24)]),
+    );
+    s.x = 100;
+    s.y = 12;
+    final below = s.groundPointAt(-4)!, above = s.groundPointAt(4)!;
+    expect(below.x, 100);
+    expect(above.x, 100);
+    expect(below.y, 8);
+    expect(above.y, 16);
+    expect(math.atan(s.groundSlope), closeTo(math.pi / 2, 1e-7));
+  });
   test('Walk pose stays continuous across both contacts and loop boundary', () {
     for (final d in [0.0, 20.0, 40.0, 60.0]) {
       final a = InkWalkPose.sample(
@@ -58,7 +76,7 @@ void main() {
           );
           final hipY = -9 - walk.rise - feet.bodyLift;
           for (final foot in [feet.back, feet.front]) {
-            expect(foot.y - hipY, inInclusiveRange(2.9, 22));
+            expect(foot.y - hipY, inInclusiveRange(5.5, 26));
             expect(foot.x.abs(), lessThan(12));
             expect(foot.angle.isFinite, isTrue);
           }
@@ -90,4 +108,39 @@ void main() {
       expect(pose.back.lift, greaterThanOrEqualTo(0));
     }
   });
+
+  test(
+    'Leaning body attachments and leg bends stay below the body on climbs',
+    () {
+      for (final degrees in [-55.0, 0.0, 30.0, 55.0, 89.0]) {
+        final angle = degrees * math.pi / 180;
+        for (var i = 0; i < 160; i++) {
+          final walk = InkWalkPose.sample(i / 4, grounded: true, walking: true);
+          final feet = InkGroundPose.place(
+            walk,
+            grounded: true,
+            angle: angle,
+            stride: InkGroundPose.strideForAngle(angle),
+            sampleGround: (d) => (d * math.cos(angle), d * math.sin(angle)),
+          );
+          final rig = InkBodyRig(
+            walk.rise + feet.bodyLift,
+            walk.lean + angle * .12,
+            walk.width,
+            walk.height,
+          );
+          for (final pair in [(feet.back, -5.0), (feet.front, 5.0)]) {
+            final hip = rig.point(pair.$2, -9);
+            final curve = InkLegCurve(hip, (pair.$1.x, pair.$1.y - 1.2));
+            expect(curve.ankle.$2 - hip.$2, greaterThan(2));
+            expect(curve.first.$2, inInclusiveRange(hip.$2, curve.ankle.$2));
+            expect(
+              curve.second.$2,
+              inInclusiveRange(curve.first.$2, curve.ankle.$2),
+            );
+          }
+        }
+      }
+    },
+  );
 }

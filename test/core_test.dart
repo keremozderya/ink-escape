@@ -371,13 +371,15 @@ void main() {
     expect(s.phase, Phase.dead);
   });
   test(
-    'A free endpoint remains a real gap if the path does not reach paper',
+    'A short bridge leaves Dot hanging at a reachable corner until tapped',
     () {
       final s = game();
       expect(draw(s, [const V(320, 0), const V(350, 0)]), isTrue);
       s.advance(15);
-      expect(s.phase, Phase.dead);
-      expect(s.y, lessThan(-300));
+      expect(s.phase, Phase.playing);
+      expect(s.grounded, isFalse);
+      expect(s.ledge?.corner.x, 392);
+      expect(s.x, lessThan(392));
     },
   );
   test(

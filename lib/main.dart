@@ -11,6 +11,8 @@ import 'core/save_journal.dart';
 import 'ink_game.dart';
 import 'soundscape.dart';
 import 'presentation/opening_story.dart';
+import 'presentation/journey_hud.dart';
+import 'presentation/centered_menu.dart';
 
 const paper = Color(0xfff6f1e6),
     inkColor = Color(0xff38312a),
@@ -27,9 +29,11 @@ Future<void> main() async {
       statusBarIconBrightness: Brightness.dark,
     ),
   );
-  final raw = jsonDecode(
-    await rootBundle.loadString('assets/data/prototype_levels.json'),
-  ) as Map<String, dynamic>;
+  final raw =
+      jsonDecode(
+            await rootBundle.loadString('assets/data/prototype_levels.json'),
+          )
+          as Map<String, dynamic>;
   const configuredLab = String.fromEnvironment('INK_LAB');
   final test = configuredLab.isEmpty ? null : configuredLab;
   final lab = raw['labs'][test];
@@ -175,7 +179,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   late final InkGame game;
   InkSession get s => widget.session;
   bool _loading = true, _settings = false, _saved = false, _saveError = false;
-  int? _pointer;
+  int? _pointer, _pullPointer;
   bool _opening = false, _openingSeen = false;
   bool _mainMenu = false;
   Timer? _saveIndicator;
@@ -242,6 +246,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     s.pause();
     widget.sound.pause();
     _pointer = null;
+    _pullPointer = null;
     if (mounted) {
       setState(() => _settings = false);
     }
@@ -252,6 +257,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     s.pause();
     widget.sound.pause();
     _pointer = null;
+    _pullPointer = null;
     setState(() {
       _mainMenu = true;
       _settings = false;
@@ -265,6 +271,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       s.levelIndex = 0;
       s.entryInk = 180;
       s.origin = 0;
+      s.entryWalked = 0;
       _retry();
     }
     _mainMenu = false;
@@ -299,6 +306,8 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   }
 
   void _retry() {
+    _pointer = null;
+    _pullPointer = null;
     game.cameraX = -96;
     s.retry();
     game.resetView();
@@ -317,6 +326,12 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final showMenu =
+        _mainMenu ||
+        s.phase == Phase.ready ||
+        s.phase == Phase.paused ||
+        s.phase == Phase.complete ||
+        (s.phase == Phase.dead && game.deathEffectComplete);
     return Scaffold(
       body: SafeArea(
         child: LayoutBuilder(
@@ -332,7 +347,13 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       key: const ValueKey('ink-drawing-surface'),
                       behavior: HitTestBehavior.opaque,
                       onPointerDown: (e) {
-                        if (_pointer == null && game.sceneReady) {
+                        if (_pointer == null &&
+                            _pullPointer == null &&
+                            game.sceneReady) {
+                          if (s.phase == Phase.playing && s.ledge != null) {
+                            _pullPointer = e.pointer;
+                            return;
+                          }
                           if (s.beginStroke(game.worldPoint(e.localPosition))) {
                             _pointer = e.pointer;
                           }
@@ -344,6 +365,12 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         }
                       },
                       onPointerUp: (e) {
+                        if (e.pointer == _pullPointer) {
+                          s.pullLedge();
+                          _pullPointer = null;
+                          setState(() {});
+                          return;
+                        }
                         if (e.pointer == _pointer) {
                           s.moveStroke(game.worldPoint(e.localPosition));
                           s.endStroke();
@@ -352,6 +379,11 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         }
                       },
                       onPointerCancel: (e) {
+                        if (e.pointer == _pullPointer) {
+                          _pullPointer = null;
+                          _pause();
+                          return;
+                        }
                         if (e.pointer == _pointer) {
                           s.losePointer();
                           _pointer = null;
@@ -380,12 +412,16 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
-                  if (!_loading)
+                  if (!_loading && !showMenu && !_opening)
                     Positioned(
                       left: 30 * factor,
                       right: 26 * factor,
                       top: 30 * factor,
-                      child: _hud(factor),
+                      child: _hud(
+                        (constraints.maxWidth / 600)
+                            .clamp(.5, factor)
+                            .toDouble(),
+                      ),
                     ),
                   if (!_loading && !_mainMenu && s.stuckCountdown != null)
                     Positioned(
@@ -395,7 +431,18 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       child: IgnorePointer(child: _stuckWarning(factor)),
                     ),
                   if (!_loading &&
+                      !showMenu &&
                       s.phase == Phase.playing &&
+                      s.ledge != null)
+                    Positioned(
+                      top: 110 * factor,
+                      left: 24 * factor,
+                      right: 24 * factor,
+                      child: IgnorePointer(child: _ledgeWarning(factor)),
+                    ),
+                  if (!_loading &&
+                      s.phase == Phase.playing &&
+                      s.ledge == null &&
                       !s.firstDrawDone &&
                       s.x > 60)
                     Positioned(
@@ -439,12 +486,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       bottom: 24 * factor,
                       child: _instruction(s.message, factor),
                     ),
-                  if (!_loading &&
-                      (_mainMenu ||
-                          s.phase == Phase.ready ||
-                          s.phase == Phase.paused ||
-                          s.phase == Phase.complete ||
-                          (s.phase == Phase.dead && game.deathEffectComplete)))
+                  if (!_loading && showMenu)
                     Positioned.fill(child: _overlay(factor)),
                   if (_opening && !_loading)
                     Positioned.fill(
@@ -521,6 +563,65 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _ledgeWarning(double f) {
+    final pulls = s.ledge!.pulls;
+    return Center(
+      child: Semantics(
+        liveRegion: true,
+        label:
+            'Dot köşeye tutundu. Ekrana basıp bırak. $pulls / ${LedgeGrip.requiredPulls}',
+        child: ExcludeSemantics(
+          child: Container(
+            key: const ValueKey('ink-ledge-warning'),
+            padding: EdgeInsets.symmetric(horizontal: 22 * f, vertical: 12 * f),
+            decoration: BoxDecoration(
+              color: paper.withValues(alpha: .96),
+              borderRadius: BorderRadius.circular(14 * f),
+              border: Border.all(color: const Color(0x558d6b45)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Dot köşeye tutundu',
+                  style: TextStyle(
+                    fontFamily: 'Cormorant',
+                    fontSize: 25 * f,
+                    fontWeight: FontWeight.w600,
+                    color: inkColor,
+                  ),
+                ),
+                Text(
+                  pulls < LedgeGrip.requiredPulls
+                      ? 'Bas–çek yaparak tırman'
+                      : 'Dot tırmanıyor…',
+                  style: TextStyle(fontSize: 14 * f, color: muted),
+                ),
+                SizedBox(height: 9 * f),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(
+                    LedgeGrip.requiredPulls,
+                    (i) => Container(
+                      margin: EdgeInsets.symmetric(horizontal: 4 * f),
+                      width: 9 * f,
+                      height: 9 * f,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: i < pulls ? inkColor : const Color(0x227b684c),
+                        border: Border.all(color: const Color(0x66877558)),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _hud(double f) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -582,7 +683,21 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
             ],
           ),
         ),
-        const Spacer(),
+        SizedBox(width: 24 * f),
+        Expanded(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 440 * f),
+              child: InkJourneyHud(
+                distanceCm: s.distanceCm,
+                progress: s.levelProgress,
+                level: s.level.number,
+                scale: f,
+              ),
+            ),
+          ),
+        ),
+        SizedBox(width: 12 * f),
         AnimatedOpacity(
           opacity: _saved ? .7 : 0,
           duration: const Duration(milliseconds: 250),
@@ -681,7 +796,9 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     } else if (dead) {
       subtitle = s.message;
     } else if (complete) {
-      subtitle = s.lab ? 'Bu mekanik denemesi tamamlandı.' : 'İlk iki bölümün sonuna ulaştın.\nYolculuğun bu ilk taslağı burada bitiyor.';
+      subtitle = s.lab
+          ? 'Bu mekanik denemesi tamamlandı.'
+          : 'İlk iki bölümün sonuna ulaştın.\nYolculuğun bu ilk taslağı burada bitiyor.';
     } else {
       subtitle = _settings
           ? 'Kâğıdın sesini kendine göre ayarla.'
@@ -708,8 +825,10 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
               right: 25 * f,
               top: 12 * f,
               bottom: 12 * f,
-              child: SingleChildScrollView(
+              child: InkCenteredMenu(
                 child: Column(
+                  key: const ValueKey('ink-menu-content'),
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     if (ready)
                       Text(

@@ -105,9 +105,42 @@ class InkGroundPose {
     }
 
     final back = foot(pose.back, -5), front = foot(pose.front, 5);
-    final lift = grounded
-        ? math.max(0.0, math.max(-back.y, -front.y) - 6)
-        : 0.0;
+    // Shoes rotate with the surface. Reserve room for their full upper edge,
+    // rather than letting the lifted front shoe overlap the body's hem.
+    final shoeTilt = math.max(
+      math.sin(back.angle).abs(),
+      math.sin(front.angle).abs(),
+    );
+    final clearance = grounded ? 6 + 4 * shoeTilt : 3.0;
+    final lift = math.max(
+      0.0,
+      math.max(-back.y, -front.y) + clearance - 9 - pose.rise,
+    );
     return InkGroundPose(back, front, lift);
   }
+}
+
+/// The exact body transform is shared by the sprite and both hip attachments.
+class InkBodyRig {
+  const InkBodyRig(this.raise, this.angle, this.scaleX, this.scaleY);
+  final double raise, angle, scaleX, scaleY;
+  (double, double) point(double x, double y) {
+    final xx = x * scaleX, yy = y * scaleY;
+    return (
+      xx * math.cos(angle) - yy * math.sin(angle),
+      xx * math.sin(angle) + yy * math.cos(angle) - raise,
+    );
+  }
+}
+
+/// Monotone control points avoid a short leg curling back through the body.
+class InkLegCurve {
+  InkLegCurve(this.hip, this.ankle) {
+    final dx = ankle.$1 - hip.$1, dy = ankle.$2 - hip.$2;
+    final bend = math.min(1.5, math.max(0.0, dy) * .15);
+    first = (hip.$1 + dx / 3 - bend, hip.$2 + dy / 3);
+    second = (hip.$1 + dx * 2 / 3 - bend, hip.$2 + dy * 2 / 3);
+  }
+  final (double, double) hip, ankle;
+  late final (double, double) first, second;
 }

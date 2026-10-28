@@ -1,5 +1,66 @@
 import 'dart:convert';
+import 'dart:collection';
 import 'dart:math' as math;
+
+/// Track structural edits so immutable collision geometry can be reused.
+class _GeometryList<T> extends ListBase<T> {
+  final List<T> _items = [];
+  int revision = 0;
+  @override
+  int get length => _items.length;
+  @override
+  set length(int value) {
+    _items.length = value;
+    revision++;
+  }
+
+  @override
+  T operator [](int index) => _items[index];
+  @override
+  void operator []=(int index, T value) {
+    _items[index] = value;
+    revision++;
+  }
+
+  @override
+  void add(T value) {
+    _items.add(value);
+    revision++;
+  }
+
+  @override
+  void addAll(Iterable<T> values) {
+    _items.addAll(values);
+    revision++;
+  }
+
+  @override
+  void insert(int index, T value) {
+    _items.insert(index, value);
+    revision++;
+  }
+
+  @override
+  void insertAll(int index, Iterable<T> values) {
+    _items.insertAll(index, values);
+    revision++;
+  }
+
+  @override
+  void clear() {
+    if (_items.isNotEmpty) {
+      _items.clear();
+      revision++;
+    }
+  }
+
+  @override
+  void removeWhere(bool Function(T) test) {
+    final before = length;
+    _items.removeWhere(test);
+    if (length != before) revision++;
+  }
+}
 
 class V {
   const V(this.x, this.y);
@@ -180,14 +241,15 @@ class Crumb {
 }
 
 class InkLine {
-  InkLine(this.id, this.points, {this.role = 'walk'});
+  InkLine(this.id, List<V> points, {this.role = 'walk'})
+    : points = List<V>.unmodifiable(points);
   final String id, role;
   final List<V> points;
   bool retired = false;
   double retiredAt = 0;
-  double get cost => pathLength(points);
-  double get left => points.map((p) => p.x).reduce(math.min);
-  double get right => points.map((p) => p.x).reduce(math.max);
+  late final double cost = pathLength(points);
+  late final double left = points.map((p) => p.x).reduce(math.min);
+  late final double right = points.map((p) => p.x).reduce(math.max);
 
   Iterable<(double, double)> crossingsAt(double x) sync* {
     for (var i = 1; i < points.length; i++) {
@@ -262,11 +324,12 @@ class Draft {
 
 /// A nonvertical floor segment, ordered in Dot's direction of travel.
 class _GroundSegment {
-  _GroundSegment(this.a, this.b, this.natural);
+  _GroundSegment(this.a, this.b, this.natural)
+    : slope = (b.y - a.y) / (b.x - a.x);
   final V a, b;
   final bool natural;
-  double get slope => (b.y - a.y) / (b.x - a.x);
-  double get lengthPerX => math.sqrt(1 + slope * slope);
+  final double slope;
+  late final double lengthPerX = math.sqrt(1 + slope * slope);
   double yAt(double xx) => a.y + (xx - a.x) * slope;
   bool contains(double xx) => xx >= a.x - 1e-6 && xx <= b.x + 1e-6;
 }
@@ -308,7 +371,7 @@ class Level {
   final int number;
   final String title;
   final double width;
-  final List<Surface> terrain = [], anchors = [];
+  final List<Surface> terrain = _GeometryList<Surface>(), anchors = [];
   final List<Pickup> pickups = [];
   final List<Gate> gates = [];
   final List<Ball> balls = [];
@@ -436,6 +499,21 @@ class Level {
 
 enum Phase { ready, playing, paused, resumeStroke, dead, complete }
 
+class LedgeGrip {
+  LedgeGrip(this.corner, this.landing);
+  static const requiredPulls = 5;
+  final V corner, landing;
+  int pulls = 0;
+  double progress = 0;
+  double get targetProgress => pulls / requiredPulls;
+  Map<String, dynamic> toJson() => {
+    'corner': corner.toJson(),
+    'landing': landing.toJson(),
+    'pulls': pulls,
+    'progress': progress,
+  };
+}
+
 class SlowBudget {
   final List<(double, double)> slices = [];
   double used(double now) {
@@ -472,13 +550,24 @@ class InkSession {
   Phase phase = Phase.ready;
   double ink = 180, entryInk = 180;
   double x = 0, y = 0, vy = 0, gameTime = 0, realTime = 0, activeTotal = 0;
-  double walked = 0, origin = 0;
+  double walked = 0, entryWalked = 0, origin = 0;
+  // A fixed paper-world scale, independent of screen size and device density.
+  static const unitsPerCentimeter = 32.0;
+  double get distanceCm => walked / unitsPerCentimeter;
+  double get levelProgress => (x / level.width).clamp(0.0, 1.0).toDouble();
   static const maxClimbDegrees = 55.0, stuckLimit = 3.0, dotHeight = 32.0;
   static final maxClimbSlope = math.tan(maxClimbDegrees * math.pi / 180);
   double _stuckElapsed = 0;
   V? _progressPoint;
   bool grounded = true, onNatural = true, strokePointerActive = false;
-  final List<InkLine> lines = [];
+  final List<InkLine> lines = _GeometryList<InkLine>();
+  LedgeGrip? ledge;
+  Level? _geometryLevel;
+  int _terrainRevision = -1, _lineRevision = -1;
+  List<bool> _retiredStates = [];
+  List<_GroundSegment> _segments = [], _nearSegments = [];
+  List<_ClimbRun> _climbs = [];
+  double _nearLeft = double.infinity, _nearRight = double.negativeInfinity;
   final Set<String> collected = {};
   final List<Crumb> crumbs = [];
   final SlowBudget budget = SlowBudget();
@@ -495,7 +584,9 @@ class InkSession {
   int? get stuckCountdown {
     // Ordinary walking briefly stays within the one-unit progress radius.
     // Wait long enough to avoid a warning flashing on every normal footstep.
-    if (phase != Phase.playing || _stuckElapsed < .15) return null;
+    if (phase != Phase.playing || ledge != null || _stuckElapsed < .15) {
+      return null;
+    }
     return (stuckLimit - _stuckElapsed).ceil().clamp(1, 3);
   }
 
@@ -532,6 +623,7 @@ class InkSession {
   }
 
   bool beginStroke(V p) {
+    if (ledge != null) return false;
     if (phase == Phase.resumeStroke) {
       if (draft?.end != null && p.distance(draft!.end!) <= 26) {
         phase = Phase.playing;
@@ -676,7 +768,8 @@ class InkSession {
     realTime = 0;
     grounded = true;
     onNatural = true;
-    walked = 0;
+    walked = entryWalked;
+    ledge = null;
     _stuckElapsed = 0;
     _progressPoint = null;
     lines.clear();
@@ -697,6 +790,7 @@ class InkSession {
       return;
     }
     phase = Phase.dead;
+    ledge = null;
     resetEpoch++;
     strokePointerActive = false;
     message = reason;
@@ -746,7 +840,7 @@ class InkSession {
       if (y < -300) {
         die('Köprü hazır olmadan kenarı geçtin.');
       }
-      if (phase == Phase.playing && x - 12 >= level.width) {
+      if (phase == Phase.playing && x >= level.width) {
         _nextLevel();
       }
       if (saveElapsed >= 5 && phase == Phase.playing) {
@@ -756,7 +850,52 @@ class InkSession {
     }
   }
 
+  void _ensureGeometry() {
+    final terrainRevision = (level.terrain as _GeometryList<Surface>).revision;
+    final lineRevision = (lines as _GeometryList<InkLine>).revision;
+    var unchanged =
+        identical(level, _geometryLevel) &&
+        terrainRevision == _terrainRevision &&
+        lineRevision == _lineRevision &&
+        _retiredStates.length == lines.length;
+    if (unchanged) {
+      for (var i = 0; i < lines.length; i++) {
+        if (_retiredStates[i] != lines[i].retired) {
+          unchanged = false;
+          break;
+        }
+      }
+    }
+    if (unchanged) return;
+    _geometryLevel = level;
+    _terrainRevision = terrainRevision;
+    _lineRevision = lineRevision;
+    _retiredStates = lines.map((line) => line.retired).toList();
+    _segments = _buildGroundSegments()..sort((a, b) => a.a.x.compareTo(b.a.x));
+    _climbs = _buildClimbRuns().toList();
+    _nearLeft = double.infinity;
+    _nearRight = double.negativeInfinity;
+  }
+
   List<_GroundSegment> get _groundSegments {
+    _ensureGeometry();
+    return _segments;
+  }
+
+  List<_GroundSegment> get _nearGround {
+    _ensureGeometry();
+    if (x - 24 >= _nearLeft && x + 24 <= _nearRight) return _nearSegments;
+    _nearLeft = (x / 64).floor() * 64.0 - 32;
+    _nearRight = _nearLeft + 128;
+    _nearSegments = [];
+    for (final segment in _segments) {
+      if (segment.a.x > _nearRight) break;
+      if (segment.b.x >= _nearLeft) _nearSegments.add(segment);
+    }
+    return _nearSegments;
+  }
+
+  List<_GroundSegment> _buildGroundSegments() {
     final segments = <_GroundSegment>[];
     for (final s in level.terrain) {
       if (s.b.x - s.a.x > 1e-7) {
@@ -837,14 +976,34 @@ class InkSession {
   /// Nearby overhead lines and unconnected platforms cannot move his feet.
   V? groundPointAt(double distance) => groundSampler()(distance);
 
+  (_ClimbRun, double)? _stepUnderFoot() {
+    _ensureGeometry();
+    for (final run in _climbs) {
+      if (!_smallEnough(run, y)) continue;
+      final distance = run.distanceAt(V(x, y));
+      if (distance != null) return (run, distance);
+    }
+    return null;
+  }
+
   /// Reuse one geometry snapshot for all foot samples in a rendered frame.
   V? Function(double) groundSampler() {
     if (!grounded) return (_) => null;
-    final segments = _groundSegments;
+    final all = _groundSegments, nearby = _nearGround;
     final origin = V(x, y);
+    final step = _support(nearby, origin) == null ? _stepUnderFoot() : null;
     return (distance) {
+      final segments = distance.abs() <= 24 ? nearby : all;
       final direction = distance < 0 ? -1.0 : 1.0;
       var point = origin, remaining = distance.abs();
+      if (step != null) {
+        final along = step.$2 + distance;
+        if (along >= 0 && along <= step.$1.path.cost) {
+          return step.$1.path.atDistance(along).$1;
+        }
+        point = along < 0 ? step.$1.points.first : step.$1.points.last;
+        remaining = along < 0 ? -along : along - step.$1.path.cost;
+      }
       for (var i = 0; i < segments.length * 2 + 2; i++) {
         final floor = _support(segments, point, direction: direction);
         if (floor == null) return null;
@@ -862,12 +1021,24 @@ class InkSession {
     };
   }
 
-  double get groundSlope =>
-      grounded ? _support(_groundSegments, V(x, y))?.slope ?? 0 : 0;
+  double get groundSlope {
+    if (!grounded) return 0;
+    final floor = _support(_nearGround, V(x, y));
+    if (floor != null) return floor.slope;
+    final step = _stepUnderFoot();
+    if (step == null) return 0;
+    final a = step.$1.path.atDistance(math.max(0, step.$2 - .1)).$1;
+    final b = step.$1.path
+        .atDistance(math.min(step.$1.path.cost, step.$2 + .1))
+        .$1;
+    return b.x - a.x > 1e-7 ? (b.y - a.y) / (b.x - a.x) : double.infinity;
+  }
 
   void _walk(double dt) {
-    final climbs = _climbRuns.toList();
-    final segments = _groundSegments;
+    if (ledge != null && _advanceGrip(dt)) return;
+    _ensureGeometry();
+    final climbs = _climbs;
+    final segments = _nearGround;
     var remaining = dt;
     // Consume distance up to each real corner before choosing the next floor.
     // Comparing the next height with the old height loses steep downslopes.
@@ -936,7 +1107,94 @@ class InkSession {
     } else {
       x = next.x;
       y = next.y;
+      _tryGrip(previous, next, segments);
     }
+  }
+
+  void _tryGrip(V previous, V next, List<_GroundSegment> segments) {
+    if (vy >= 0 || next.y > previous.y + 1e-7) return;
+    _GroundSegment? chosen;
+    var nearest = double.infinity;
+    for (final floor in segments) {
+      final corner = floor.a;
+      if (floor.slope > maxClimbSlope || floor.b.x - corner.x < .01) continue;
+      // Only the approaching, exposed corner can be caught. Never re-grab the
+      // platform Dot just walked off or a vertex inside a continuous contour.
+      final reach = corner.x - next.x;
+      if (reach < -2 || reach > 12 || corner.x + 2 < previous.x) continue;
+      final rise = corner.y - next.y;
+      if (rise < -2 || rise > dotHeight * .75) continue;
+      final blocked = segments.any(
+        (other) =>
+            !identical(other, floor) &&
+            other.a.x < corner.x - .01 &&
+            other.contains(corner.x - .01) &&
+            (other.yAt(corner.x) - corner.y).abs() < .75,
+      );
+      if (blocked || reach >= nearest) continue;
+      nearest = reach;
+      chosen = floor;
+    }
+    if (chosen == null) return;
+    final targetX = math.min(chosen.a.x + 8, chosen.b.x);
+    ledge = LedgeGrip(chosen.a, V(targetX, chosen.yAt(targetX)));
+    grounded = false;
+    onNatural = false;
+    vy = 0;
+    _stuckElapsed = 0;
+    draft = null;
+    strokePointerActive = false;
+    emit('penStop');
+    emit('ledgeGrab', chosen.a);
+    onSaveRequested?.call(true);
+  }
+
+  bool pullLedge() {
+    final grip = ledge;
+    if (phase != Phase.playing ||
+        grip == null ||
+        grip.pulls >= LedgeGrip.requiredPulls) {
+      return false;
+    }
+    grip.pulls++;
+    emit('ledgePull', grip.corner);
+    return true;
+  }
+
+  bool _gripHasSupport(LedgeGrip grip) => _nearGround.any(
+    (floor) =>
+        floor.contains(grip.landing.x) &&
+        (floor.yAt(grip.landing.x) - grip.landing.y).abs() <= .75,
+  );
+
+  bool _advanceGrip(double dt) {
+    final grip = ledge!;
+    if (!_gripHasSupport(grip)) {
+      ledge = null;
+      vy = 0;
+      return false;
+    }
+    grip.progress = math.min(grip.targetProgress, grip.progress + dt * 1.6);
+    final t = grip.progress * grip.progress * (3 - 2 * grip.progress);
+    final hang = grip.corner + const V(-18, -24);
+    final desired = hang + (grip.landing - hang) * t;
+    final before = V(x, y);
+    final next = before + (desired - before) * (1 - math.exp(-20 * dt));
+    x = next.x;
+    y = next.y;
+    vy = 0;
+    if (grip.pulls > 0) walked += before.distance(next);
+    if (grip.progress >= 1 && next.distance(grip.landing) < .2) {
+      x = grip.landing.x;
+      y = grip.landing.y;
+      final floor = _support(_nearGround, grip.landing);
+      grounded = true;
+      onNatural = floor?.natural ?? false;
+      ledge = null;
+      emit('land');
+      onSaveRequested?.call(true);
+    }
+    return true;
   }
 
   void _walkTo(V target, bool natural) {
@@ -981,7 +1239,7 @@ class InkSession {
     if (run != null) yield _ClimbRun(run, natural);
   }
 
-  Iterable<_ClimbRun> get _climbRuns sync* {
+  Iterable<_ClimbRun> _buildClimbRuns() sync* {
     final terrain = level.terrain.where((s) => s.tag == 'ground').toList()
       ..sort((a, b) => a.a.x.compareTo(b.a.x));
     yield* _groupClimbs(terrain.map((s) => (s.a, s.b)), true);
@@ -1052,6 +1310,11 @@ class InkSession {
   }
 
   void _trackProgress(double dt) {
+    if (ledge != null) {
+      _stuckElapsed = 0;
+      _progressPoint = V(x, y);
+      return;
+    }
     final position = V(x, y);
     final previous = _progressPoint;
     if (previous == null || position.distance(previous) >= 1) {
@@ -1225,7 +1488,9 @@ class InkSession {
     x -= width;
     origin += width;
     levelIndex++;
+    ledge = null;
     entryInk = ink;
+    entryWalked = walked;
     _loadLevel();
     lines.clear();
     crumbs.clear();
@@ -1245,6 +1510,8 @@ class InkSession {
     checkpoint._loadLevel();
     checkpoint.entryInk = entryInk;
     checkpoint.ink = entryInk;
+    checkpoint.entryWalked = entryWalked;
+    checkpoint.walked = entryWalked;
     checkpoint.activeTotal = activeTotal;
     checkpoint.origin = origin;
     checkpoint.resetEpoch = resetEpoch;
@@ -1267,6 +1534,8 @@ class InkSession {
     'realTime': realTime,
     'activeTotal': activeTotal,
     'walked': walked,
+    'ledge': ledge?.toJson(),
+    'entryWalked': entryWalked,
     'stuckElapsed': _stuckElapsed,
     'progressPoint': _progressPoint?.toJson(),
     'origin': origin,
@@ -1317,6 +1586,8 @@ class InkSession {
             0,
             (sum, level) => sum + (level['width'] as num).toDouble(),
           );
+      s.entryWalked = s.origin;
+      s.walked = s.entryWalked;
       s.activeTotal = d('activeTotal');
       s.resetEpoch = (m['resetEpoch'] as num).toInt() + 1;
       s.firstDrawDone = m['firstDrawDone'] == true;
@@ -1333,6 +1604,11 @@ class InkSession {
     s.activeTotal = d('activeTotal');
     s.saveElapsed = (m['saveElapsed'] as num?)?.toDouble() ?? 0;
     s.walked = d('walked');
+    // Older saves did not retain the chapter-entry walking distance. Estimate
+    // only that checkpoint; the live counter keeps its exact saved distance.
+    s.entryWalked =
+        (m['entryWalked'] as num?)?.toDouble() ??
+        math.max(0.0, s.walked - math.max(0.0, s.x));
     s._stuckElapsed = (m['stuckElapsed'] as num?)?.toDouble() ?? 0;
     s._progressPoint = m['progressPoint'] == null
         ? null
@@ -1375,6 +1651,22 @@ class InkSession {
     }
     for (final dynamic a in m['budget'] as List) {
       s.budget.slices.add(((a[0] as num).toDouble(), (a[1] as num).toDouble()));
+    }
+    if (m['ledge'] case final Map raw) {
+      final grip = LedgeGrip(V.from(raw['corner']), V.from(raw['landing']));
+      grip.pulls = (raw['pulls'] as num).toInt().clamp(
+        0,
+        LedgeGrip.requiredPulls,
+      );
+      grip.progress = (raw['progress'] as num).toDouble().clamp(
+        0.0,
+        grip.targetProgress,
+      );
+      if (s._gripHasSupport(grip)) {
+        s.ledge = grip;
+        s.grounded = false;
+        s.vy = 0;
+      }
     }
     if (m['draft'] != null) {
       final a = m['draft'];

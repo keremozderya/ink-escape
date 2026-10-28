@@ -57,7 +57,7 @@ void main() {
           await alphaAt(world, ground, 210, ground.toInt() - 50),
           greaterThan(200),
         );
-        expect(await alphaAt(world, ground, 210, 280), 0);
+        expect(await alphaAt(world, ground, 210, ground.toInt() - 140), 0);
       }
       clear.dispose();
     });

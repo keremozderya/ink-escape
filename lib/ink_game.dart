@@ -18,6 +18,7 @@ class InkGame extends FlameGame {
   late ui.Image dot, props, garden, openingArt;
   late PaperWorld paperWorld;
   bool sceneReady = false;
+  bool _removed = false;
   double cameraX = -96, visualTime = 0, deadAge = 0, _uiTime = 0;
   double _origin = 0;
   double _landAt = -10;
@@ -27,17 +28,23 @@ class InkGame extends FlameGame {
   final List<InkPickupFlight> _flights = [];
   final List<InkParticle> particles = [];
   Level? _nextLevel;
+  List<Surface> _nextTerrain = [];
+  final Map<Surface, ui.Picture> _terrainPictures = {};
+  Object? _lastUiState;
   int _shownIndex = -1;
   static const double worldWidth = 480,
-      worldHeight = 853.333,
-      groundInset = 64,
+      worldHeight = 400,
+      groundInset = 40,
       baseline = worldHeight - groundInset;
-  double get scale => size.y / worldHeight;
+  // Crop the unused sky while keeping enough route visible for a full stroke.
+  double get scale => math.min(size.y / worldHeight, size.x / worldWidth);
   double get visibleWidth => size.x / scale;
+  double get visibleHeight => size.y / scale;
+  double get groundY => visibleHeight - groundInset;
   bool get deathEffectComplete => deadAge >= InkDeathPose.duration;
   V worldPoint(Offset local) =>
-      V(local.dx / scale + cameraX, baseline - local.dy / scale);
-  Offset point(V p) => Offset(p.x - cameraX, baseline - p.y);
+      V(local.dx / scale + cameraX, groundY - local.dy / scale);
+  Offset point(V p) => Offset(p.x - cameraX, groundY - p.y);
 
   @override
   Future<void> onLoad() async {
@@ -61,6 +68,11 @@ class InkGame extends FlameGame {
       levelOrigin += (level['width'] as num).toDouble();
     }
     paperWorld = PaperWorld(garden, ruins, memories);
+    await paperWorld.prepare();
+    if (_removed) {
+      paperWorld.dispose();
+      return;
+    }
     cameraX = initialCamera ?? session.x - 96;
     _origin = session.origin;
     _cacheNext();
@@ -99,10 +111,32 @@ class InkGame extends FlameGame {
     if (_shownIndex == session.levelIndex) {
       return;
     }
+    _clearTerrainPictures();
     _shownIndex = session.levelIndex;
     _nextLevel = _shownIndex + 1 < session.levelData.length
         ? Level.from(session.levelData[_shownIndex + 1])
         : null;
+    final offset = V(session.level.width, 0);
+    _nextTerrain = [
+      for (final surface in _nextLevel?.terrain ?? <Surface>[])
+        if (surface.id != 'previous-tail' && surface.id != 'next-tail')
+          Surface(surface.id, surface.a + offset, surface.b + offset),
+    ];
+  }
+
+  void _clearTerrainPictures() {
+    for (final picture in _terrainPictures.values) {
+      picture.dispose();
+    }
+    _terrainPictures.clear();
+  }
+
+  @override
+  void onRemove() {
+    _removed = true;
+    _clearTerrainPictures();
+    if (sceneReady) paperWorld.dispose();
+    super.onRemove();
   }
 
   void effect(String name, V at) {
@@ -186,7 +220,24 @@ class InkGame extends FlameGame {
     _uiTime += step;
     if (_uiTime >= .05) {
       _uiTime = 0;
-      onFrame?.call();
+      final uiState = (
+        session.phase,
+        session.ink.floor(),
+        session.distanceCm.toStringAsFixed(1),
+        session.levelProgress,
+        session.activeLines,
+        session.stuckCountdown,
+        session.ledge?.pulls,
+        session.firstDrawDone,
+        session.x > 60,
+        session.realTime < session.messageUntil,
+        session.message,
+        deathEffectComplete,
+      );
+      if (uiState != _lastUiState) {
+        _lastUiState = uiState;
+        onFrame?.call();
+      }
     }
   }
 
@@ -200,16 +251,16 @@ class InkGame extends FlameGame {
     }
     canvas.save();
     canvas.scale(scale);
-    canvas.clipRect(Rect.fromLTWH(0, 0, visibleWidth, worldHeight));
+    canvas.clipRect(Rect.fromLTWH(0, 0, visibleWidth, visibleHeight));
     canvas.drawRect(
-      Rect.fromLTWH(0, 0, visibleWidth, worldHeight),
+      Rect.fromLTWH(0, 0, visibleWidth, visibleHeight),
       Paint()..color = const Color(0xfff5f0e4),
     );
     paperWorld.background(
       canvas,
       cameraX + session.origin,
       width: visibleWidth,
-      groundY: baseline,
+      groundY: groundY,
     );
     _cacheNext();
     // Distant pencil stems; they never act as collision surfaces.
@@ -224,17 +275,9 @@ class InkGame extends FlameGame {
     }
     final next = _nextLevel;
     if (next != null) {
-      for (final t in next.terrain) {
-        if (t.id == 'previous-tail' || t.id == 'next-tail') {
-          continue;
-        }
-        final offset = V(session.level.width, 0);
-        if (t.a.x + offset.x > cameraX + visibleWidth + 40) {
-          break;
-        }
-        if (t.b.x + offset.x >= cameraX) {
-          _terrain(canvas, Surface(t.id, t.a + offset, t.b + offset));
-        }
+      for (final surface in _nextTerrain) {
+        if (surface.a.x > cameraX + visibleWidth + 40) continue;
+        if (surface.b.x >= cameraX - 40) _terrain(canvas, surface);
       }
       for (final p in next.pickups) {
         _prop(
@@ -467,7 +510,7 @@ class InkGame extends FlameGame {
       canvas,
       cameraX + session.origin,
       width: visibleWidth,
-      groundY: baseline,
+      groundY: groundY,
     );
     if (session.phase == Phase.resumeStroke && draft != null) {
       final q = point(draft.points.last);
@@ -485,7 +528,30 @@ class InkGame extends FlameGame {
   }
 
   void _terrain(Canvas c, Surface s) {
-    final a = point(s.a), b = point(s.b);
+    if (s.a.y > 64) return;
+    final picture = _terrainPictures.putIfAbsent(s, () {
+      final recorder = ui.PictureRecorder();
+      _recordTerrain(Canvas(recorder), s);
+      return recorder.endRecording();
+    });
+    c.save();
+    c.translate(-cameraX, groundY);
+    c.drawPicture(picture);
+    c.restore();
+    // Deterministic botanical details sit on the same natural surface.
+    if (s.b.x - s.a.x > 100) {
+      final base = s.a.x + 65;
+      for (var xx = base; xx < s.b.x - 32; xx += 237) {
+        if (xx - cameraX < -80 || xx - cameraX > visibleWidth + 80) {
+          continue;
+        }
+        _groundProp(c, 6, point(V(xx, s.yAt(xx))), 65, 63);
+      }
+    }
+  }
+
+  void _recordTerrain(Canvas c, Surface s) {
+    final a = Offset(s.a.x, -s.a.y), b = Offset(s.b.x, -s.b.y);
     final elevated = s.a.y > 64;
     if (elevated) {
       return;
@@ -494,16 +560,14 @@ class InkGame extends FlameGame {
     final count = math.max(2, ((b.dx - a.dx) / 7).ceil());
     for (var i = 0; i <= count; i++) {
       final t = i / count, x = a.dx + (b.dx - a.dx) * t;
-      final noise =
-          math.sin((x + cameraX) * 1.7) * .6 +
-          math.sin((x + cameraX) * .41) * .55;
+      final noise = math.sin(x * 1.7) * .6 + math.sin(x * .41) * .55;
       p.lineTo(x, a.dy + (b.dy - a.dy) * t + noise);
     }
     // A torn vertical edge and a folded underside, rather than rectangular blocks.
     p.lineTo(b.dx + 1, b.dy + 22);
     p.lineTo(b.dx - 3, b.dy + 45);
-    p.lineTo(b.dx + 2, 880);
-    p.lineTo(a.dx - 2, 880);
+    p.lineTo(b.dx + 2, groundInset + 24);
+    p.lineTo(a.dx - 2, groundInset + 24);
     p.lineTo(a.dx + 2, a.dy + 36);
     p.close();
     c.drawPath(
@@ -516,7 +580,7 @@ class InkGame extends FlameGame {
     c.save();
     c.clipPath(p);
     c.drawRect(
-      Rect.fromLTRB(a.dx - 2, math.min(a.dy, b.dy), b.dx + 2, 880),
+      Rect.fromLTRB(a.dx - 2, math.min(a.dy, b.dy), b.dx + 2, groundInset + 24),
       Paint()
         ..shader = ui.Gradient.linear(
           Offset(0, math.min(a.dy, b.dy)),
@@ -525,7 +589,7 @@ class InkGame extends FlameGame {
         ),
     );
     for (var i = (s.a.x / 13).floor(); i < s.b.x / 13; i++) {
-      final xx = i * 13.0 - cameraX, yy = baseline - s.yAt(i * 13.0);
+      final xx = i * 13.0, yy = -s.yAt(i * 13.0);
       c.drawLine(
         Offset(xx, yy + 5),
         Offset(xx - 3, yy + 11 + i % 7),
@@ -538,10 +602,7 @@ class InkGame extends FlameGame {
     final edge = Path()..moveTo(a.dx, a.dy);
     for (var i = 1; i <= count; i++) {
       final t = i / count, xx = a.dx + (b.dx - a.dx) * t;
-      edge.lineTo(
-        xx,
-        a.dy + (b.dy - a.dy) * t + math.sin((xx + cameraX) * 1.7) * .6,
-      );
+      edge.lineTo(xx, a.dy + (b.dy - a.dy) * t + math.sin(xx * 1.7) * .6);
     }
     c.drawPath(
       edge,
@@ -550,16 +611,6 @@ class InkGame extends FlameGame {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.25,
     );
-    // Deterministic botanical details sit on the same natural surface.
-    if (s.b.x - s.a.x > 100) {
-      final base = s.a.x + 65;
-      for (var xx = base; xx < s.b.x - 32; xx += 237) {
-        if (xx - cameraX < -80 || xx - cameraX > visibleWidth + 80) {
-          continue;
-        }
-        _groundProp(c, 6, point(V(xx, s.yAt(xx))), 65, 63);
-      }
-    }
   }
 
   void _line(Canvas c, List<V> points, Color color, double width) {
@@ -629,7 +680,7 @@ class InkGame extends FlameGame {
     final q = dead
         ? Offset(
             position.dx.clamp(32, visibleWidth - 32).toDouble(),
-            position.dy.clamp(65, worldHeight - 24).toDouble(),
+            position.dy.clamp(65, visibleHeight - 24).toDouble(),
           )
         : position;
     final death = InkDeathPose(deadAge);
@@ -682,6 +733,38 @@ class InkGame extends FlameGame {
     );
     c.save();
     c.translate(q.dx, q.dy);
+    final landing = ((visualTime - _landAt) / .28).clamp(0.0, 1.0);
+    final impact = math.sin(landing * math.pi) * .10;
+    final falling = session.grounded
+        ? 0.0
+        : (-session.vy / 250).clamp(0.0, 1.0);
+    final rig = InkBodyRig(
+      pose.rise + feet.bodyLift,
+      pose.lean + (session.grounded ? _groundAngle * .12 : 0),
+      pose.width + impact - falling * .05,
+      pose.height - impact + falling * .10,
+    );
+    final grip = session.ledge;
+    if (grip != null) {
+      final hand = point(grip.corner) - q;
+      final shoulder = rig.point(18, -13);
+      final arm = Path()
+        ..moveTo(shoulder.$1, shoulder.$2)
+        ..quadraticBezierTo(hand.dx + 6, hand.dy + 10, hand.dx, hand.dy - 1);
+      c.drawPath(
+        arm,
+        Paint()
+          ..color = const Color(0xff302b26)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3.4
+          ..strokeCap = StrokeCap.round,
+      );
+      c.drawCircle(
+        hand - const Offset(0, 1),
+        2.6,
+        Paint()..color = const Color(0xff302b26),
+      );
+    }
     void foot(
       InkFootPose p,
       InkFootPlacement placement,
@@ -689,10 +772,18 @@ class InkGame extends FlameGame {
       bool front,
     ) {
       final x = placement.x, y = placement.y;
-      final hipY = -9 - pose.rise - feet.bodyLift;
+      final joint = rig.point(hip, -9);
+      final curve = InkLegCurve(joint, (x, y - 1.2));
       final path = Path()
-        ..moveTo(hip, hipY)
-        ..cubicTo(hip - 1, hipY + (y - hipY) * .55, x - 2, y - 4, x, y - 1.2);
+        ..moveTo(joint.$1, joint.$2)
+        ..cubicTo(
+          curve.first.$1,
+          curve.first.$2,
+          curve.second.$1,
+          curve.second.$2,
+          curve.ankle.$1,
+          curve.ankle.$2,
+        );
       c.drawPath(
         path,
         Paint()
@@ -724,18 +815,11 @@ class InkGame extends FlameGame {
     }
 
     foot(pose.back, feet.back, -5, false);
+    foot(pose.front, feet.front, 5, true);
     c.save();
-    c.translate(0, -pose.rise - feet.bodyLift);
-    c.rotate(pose.lean + (session.grounded ? _groundAngle * .12 : 0));
-    final landing = ((visualTime - _landAt) / .28).clamp(0.0, 1.0);
-    final impact = math.sin(landing * math.pi) * .10;
-    final falling = session.grounded
-        ? 0.0
-        : (-session.vy / 250).clamp(0.0, 1.0);
-    c.scale(
-      pose.width + impact - falling * .05,
-      pose.height - impact + falling * .10,
-    );
+    c.translate(0, -rig.raise);
+    c.rotate(rig.angle);
+    c.scale(rig.scaleX, rig.scaleY);
     // Keep one detailed body identity and animate the feet separately; no pose popping.
     c.clipRect(const Rect.fromLTRB(-35, -60, 35, -7));
     c.drawImageRect(
@@ -759,7 +843,6 @@ class InkGame extends FlameGame {
       }
     }
     c.restore();
-    foot(pose.front, feet.front, 5, true);
     c.restore();
     if (dead) {
       c.restore();
@@ -781,8 +864,9 @@ class InkGame extends FlameGame {
       c.drawPath(
         stain,
         Paint()
-          ..color = const Color(0xff38312a)
-              .withValues(alpha: pose.stainOpacity),
+          ..color = const Color(
+            0xff38312a,
+          ).withValues(alpha: pose.stainOpacity),
       );
     }
     c.drawOval(
@@ -818,8 +902,9 @@ class InkGame extends FlameGame {
           drop.radius * .35,
         ),
         Paint()
-          ..color = const Color(0xffa9987b)
-              .withValues(alpha: drop.opacity * .28),
+          ..color = const Color(
+            0xffa9987b,
+          ).withValues(alpha: drop.opacity * .28),
       );
       c.restore();
     }

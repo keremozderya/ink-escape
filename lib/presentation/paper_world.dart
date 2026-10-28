@@ -20,6 +20,44 @@ class PaperWorld {
   final ui.Image garden, ruins;
   final List<PaperMemory> memories;
   final Map<bool, TextPainter> _notes = {};
+  ui.Image? _fadedGarden;
+
+  /// Flatten the fixed fade once instead of allocating a viewport-sized layer
+  /// and applying the same mask on every rendered frame.
+  Future<void> prepare() async {
+    if (_fadedGarden != null) return;
+    final recorder = ui.PictureRecorder();
+    final c = Canvas(recorder);
+    final bounds = Rect.fromLTWH(
+      0,
+      0,
+      garden.width.toDouble(),
+      garden.height.toDouble(),
+    );
+    c.drawImage(garden, Offset.zero, Paint());
+    c.drawRect(
+      bounds,
+      Paint()
+        ..blendMode = BlendMode.dstIn
+        ..shader = ui.Gradient.linear(
+          Offset.zero,
+          Offset(0, garden.height * 90 / 570),
+          [Colors.transparent, Colors.white],
+        ),
+    );
+    final picture = recorder.endRecording();
+    _fadedGarden = await picture.toImage(garden.width, garden.height);
+    picture.dispose();
+  }
+
+  void dispose() {
+    _fadedGarden?.dispose();
+    _fadedGarden = null;
+    for (final note in _notes.values) {
+      note.dispose();
+    }
+    _notes.clear();
+  }
 
   void _tile(
     Canvas c,
@@ -69,7 +107,16 @@ class PaperWorld {
   }) {
     // Bury the image footers behind the physical paper. The ruins have an
     // irregular transparent lower edge, which needs a deeper overlap.
-    _tile(c, garden, camera, 570, groundY - 570 + 12, .25, width, fadeTop: 90);
+    _tile(
+      c,
+      _fadedGarden ?? garden,
+      camera,
+      570,
+      groundY - 570 + 12,
+      .25,
+      width,
+      fadeTop: _fadedGarden == null ? 90 : 0,
+    );
     // Low contrast, separate silhouette: discarded drawings have depth.
     _tile(c, ruins, camera, 288, groundY - 288 + 96, .52, width);
     for (final memory in memories) {
