@@ -24,6 +24,48 @@ InkSession ledgeScene({
 }
 
 void main() {
+  test(
+    'Every pull raises Dot vertically, then walking resumes without a forward snap',
+    () {
+      final s = ledgeScene()..advance(1 / 120);
+      final heldX = s.x, corner = s.ledge!.corner;
+      expect(corner.x - heldX, LedgeGrip.bodyInset);
+      var previousY = s.y;
+      for (var pull = 0; pull < LedgeGrip.requiredPulls; pull++) {
+        s.pullLedge();
+        for (var frame = 0; frame < 20 && s.ledge != null; frame++) {
+          s.advance(1 / 120);
+          expect(s.x, heldX);
+          expect(s.y, greaterThanOrEqualTo(previousY - 1e-7));
+          previousY = s.y;
+        }
+      }
+      for (var frame = 0; frame < 240 && s.ledge != null; frame++) {
+        s.advance(1 / 120);
+        expect(s.x, heldX);
+        expect(s.y, greaterThanOrEqualTo(previousY - 1e-7));
+        previousY = s.y;
+      }
+      expect(s.ledge, isNull);
+      expect(s.cornerSupport, isNotNull);
+      expect(s.y, corner.y);
+      s.advance(1 / 120);
+      expect(s.x - heldX, closeTo(s.walkSpeed / 120, 1e-6));
+      s.advance(.3);
+      expect(s.cornerSupport, isNull);
+      expect(s.grounded, isTrue);
+      expect(s.x, greaterThan(corner.x));
+    },
+  );
+
+  test('A corner below the actual palm stays out of reach', () {
+    final s = ledgeScene(y: -18)..advance(1 / 120);
+    expect(
+      s.ledge,
+      isNull,
+      reason: 'A drop below the actual palm cannot trigger a grab',
+    );
+  });
   for (final ink in [false, true]) {
     test(
       'Touching a ${ink ? 'drawn' : 'paper'} corner hangs; five pulls climb onto it',

@@ -502,6 +502,8 @@ enum Phase { ready, playing, paused, resumeStroke, dead, complete }
 class LedgeGrip {
   LedgeGrip(this.corner, this.landing);
   static const requiredPulls = 5;
+  // Match the existing front palm in the 54-unit Dot sprite.
+  static const bodyInset = 14.0, hangDepth = 13.18;
   final V corner, landing;
   int pulls = 0;
   double progress = 0;
@@ -562,6 +564,7 @@ class InkSession {
   bool grounded = true, onNatural = true, strokePointerActive = false;
   final List<InkLine> lines = _GeometryList<InkLine>();
   LedgeGrip? ledge;
+  V? cornerSupport;
   Level? _geometryLevel;
   int _terrainRevision = -1, _lineRevision = -1;
   List<bool> _retiredStates = [];
@@ -770,6 +773,7 @@ class InkSession {
     onNatural = true;
     walked = entryWalked;
     ledge = null;
+    cornerSupport = null;
     _stuckElapsed = 0;
     _progressPoint = null;
     lines.clear();
@@ -791,6 +795,7 @@ class InkSession {
     }
     phase = Phase.dead;
     ledge = null;
+    cornerSupport = null;
     resetEpoch++;
     strokePointerActive = false;
     message = reason;
@@ -990,7 +995,7 @@ class InkSession {
   V? Function(double) groundSampler() {
     if (!grounded) return (_) => null;
     final all = _groundSegments, nearby = _nearGround;
-    final origin = V(x, y);
+    final origin = cornerSupport ?? V(x, y);
     final step = _support(nearby, origin) == null ? _stepUnderFoot() : null;
     return (distance) {
       final segments = distance.abs() <= 24 ? nearby : all;
@@ -1036,6 +1041,7 @@ class InkSession {
 
   void _walk(double dt) {
     if (ledge != null && _advanceGrip(dt)) return;
+    if (cornerSupport != null && _walkFromCorner(dt)) return;
     _ensureGeometry();
     final climbs = _climbs;
     final segments = _nearGround;
@@ -1123,7 +1129,7 @@ class InkSession {
       final reach = corner.x - next.x;
       if (reach < -2 || reach > 12 || corner.x + 2 < previous.x) continue;
       final rise = corner.y - next.y;
-      if (rise < -2 || rise > dotHeight * .75) continue;
+      if (rise < -2 || rise > LedgeGrip.hangDepth + 2) continue;
       final blocked = segments.any(
         (other) =>
             !identical(other, floor) &&
@@ -1138,6 +1144,9 @@ class InkSession {
     if (chosen == null) return;
     final targetX = math.min(chosen.a.x + 8, chosen.b.x);
     ledge = LedgeGrip(chosen.a, V(targetX, chosen.yAt(targetX)));
+    x = chosen.a.x - LedgeGrip.bodyInset;
+    y = chosen.a.y - LedgeGrip.hangDepth;
+    cornerSupport = null;
     grounded = false;
     onNatural = false;
     vy = 0;
@@ -1176,23 +1185,46 @@ class InkSession {
     }
     grip.progress = math.min(grip.targetProgress, grip.progress + dt * 1.6);
     final t = grip.progress * grip.progress * (3 - 2 * grip.progress);
-    final hang = grip.corner + const V(-18, -24);
-    final desired = hang + (grip.landing - hang) * t;
+    final desiredY = grip.corner.y - LedgeGrip.hangDepth * (1 - t);
     final before = V(x, y);
-    final next = before + (desired - before) * (1 - math.exp(-20 * dt));
-    x = next.x;
-    y = next.y;
+    x = grip.corner.x - LedgeGrip.bodyInset;
+    y += (desiredY - y) * (1 - math.exp(-20 * dt));
     vy = 0;
-    if (grip.pulls > 0) walked += before.distance(next);
-    if (grip.progress >= 1 && next.distance(grip.landing) < .2) {
-      x = grip.landing.x;
-      y = grip.landing.y;
+    if (grip.pulls > 0) walked += (y - before.y).abs();
+    if (grip.progress >= 1 && (y - grip.corner.y).abs() < .2) {
+      walked += (grip.corner.y - y).abs();
+      y = grip.corner.y;
       final floor = _support(_nearGround, grip.landing);
       grounded = true;
       onNatural = floor?.natural ?? false;
+      cornerSupport = grip.corner;
       ledge = null;
       emit('land');
       onSaveRequested?.call(true);
+    }
+    return true;
+  }
+
+  /// The front foot has reached the rim. Start ordinary walking from that
+  /// foothold after the vertical pull, without teleporting the body forward.
+  bool _walkFromCorner(double dt) {
+    final corner = cornerSupport!;
+    final floor = _support(_nearGround, corner);
+    if (!grounded || floor == null) {
+      cornerSupport = null;
+      grounded = false;
+      onNatural = false;
+      return false;
+    }
+    final target = corner.x + .002;
+    final travel = math.max(0.0, target - x);
+    if (walkSpeed * dt < travel) {
+      _walkTo(V(x + walkSpeed * dt, corner.y), floor.natural);
+    } else {
+      _walkTo(V(target, floor.yAt(target)), floor.natural);
+      cornerSupport = null;
+      final remaining = dt - travel / walkSpeed;
+      if (remaining > 1e-9) _walk(remaining);
     }
     return true;
   }
@@ -1489,6 +1521,7 @@ class InkSession {
     origin += width;
     levelIndex++;
     ledge = null;
+    cornerSupport = null;
     entryInk = ink;
     entryWalked = walked;
     _loadLevel();
@@ -1535,6 +1568,7 @@ class InkSession {
     'activeTotal': activeTotal,
     'walked': walked,
     'ledge': ledge?.toJson(),
+    'cornerSupport': cornerSupport?.toJson(),
     'entryWalked': entryWalked,
     'stuckElapsed': _stuckElapsed,
     'progressPoint': _progressPoint?.toJson(),
@@ -1664,8 +1698,19 @@ class InkSession {
       );
       if (s._gripHasSupport(grip)) {
         s.ledge = grip;
+        s.x = grip.corner.x - LedgeGrip.bodyInset;
+        s.y = s.y.clamp(grip.corner.y - LedgeGrip.hangDepth, grip.corner.y);
         s.grounded = false;
         s.vy = 0;
+      }
+    }
+    if (m['cornerSupport'] != null && s.ledge == null) {
+      final corner = V.from(m['cornerSupport']);
+      if (s._support(s._nearGround, corner) != null &&
+          s.x >= corner.x - LedgeGrip.bodyInset - .1 &&
+          s.x <= corner.x + .01) {
+        s.cornerSupport = corner;
+        s.grounded = true;
       }
     }
     if (m['draft'] != null) {

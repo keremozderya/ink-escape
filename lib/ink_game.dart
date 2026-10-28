@@ -73,7 +73,9 @@ class InkGame extends FlameGame {
       paperWorld.dispose();
       return;
     }
-    cameraX = initialCamera ?? session.x - 96;
+    cameraX = session.ledge != null
+        ? session.x - 96
+        : initialCamera ?? session.x - 96;
     _origin = session.origin;
     _cacheNext();
     if (session.level.gates.any((g) => g.open)) {
@@ -142,6 +144,7 @@ class InkGame extends FlameGame {
   void effect(String name, V at) {
     onEffect?.call(name);
     if (name == 'land') _landAt = visualTime;
+    if (name == 'ledgeGrab') cameraX = session.x - 96;
     if (name == 'death') {
       deadAge = 0;
       particles.clear();
@@ -672,6 +675,22 @@ class InkGame extends FlameGame {
     }
   }
 
+  // The front arm is taken from the existing atlas, including its ink texture.
+  // The diagonal cut follows the body's outline, leaving the face untouched.
+  static final Path _frontArmMask = (() {
+    Offset p(double x, double y) =>
+        Offset(-27 + x * 54 / 443.5, -47.52 + y * 54 / 443.5);
+    final points = [
+      p(324, 282),
+      p(338, 274),
+      p(365, 274),
+      p(365, 320),
+      p(313, 320),
+      p(307, 308),
+    ];
+    return Path()..addPolygon(points, true);
+  })();
+
   void _dot(Canvas c) {
     final dead = session.phase == Phase.dead;
     final position = point(V(session.x, session.y));
@@ -690,7 +709,17 @@ class InkGame extends FlameGame {
     }
     final walking =
         (session.phase == Phase.playing || dead) && session.grounded;
-    final pose = InkWalkPose.sample(
+    final grip = session.ledge;
+    final corner = grip?.corner ?? session.cornerSupport;
+    final gripping = grip != null;
+    final edging = session.cornerSupport != null;
+    final rise = grip == null
+        ? 1.0
+        : (1 + (session.y - grip.corner.y) / LedgeGrip.hangDepth).clamp(
+            0.0,
+            1.0,
+          );
+    var pose = InkWalkPose.sample(
       _gaitDistance,
       grounded: session.grounded,
       walking: walking,
@@ -698,7 +727,7 @@ class InkGame extends FlameGame {
       movement: _movement,
     );
     final sampleGround = session.groundSampler();
-    final feet = InkGroundPose.place(
+    var feet = InkGroundPose.place(
       pose,
       grounded: session.grounded,
       angle: _groundAngle,
@@ -708,6 +737,26 @@ class InkGame extends FlameGame {
         return at == null ? null : (at.x - session.x, at.y - session.y);
       },
     );
+    if (corner != null) {
+      final plant = edging ? 1.0 : ((rise - .25) / .35).clamp(0.0, 1.0);
+      pose = InkWalkPose(
+        const InkFootPose(-4, 2, false),
+        InkFootPose(6, 1, plant >= 1),
+        0,
+        1,
+        1,
+        0,
+      );
+      feet = InkGroundPose(
+        const InkFootPlacement(-4, -2, 0),
+        InkFootPlacement(
+          6 + (corner.x - session.x + 2 - 6) * plant,
+          -1 + (session.y - corner.y + 1) * plant,
+          0,
+        ),
+        0,
+      );
+    }
     final sw = dot.width / 4, sh = dot.height / 2;
     final src = Rect.fromLTWH(0, 0, sw, sh);
     if (dead) {
@@ -721,16 +770,18 @@ class InkGame extends FlameGame {
       );
       c.translate(0, -death.bodyLift);
     }
-    c.drawOval(
-      Rect.fromCenter(
-        center: q + const Offset(0, 2),
-        width: 26 - pose.rise,
-        height: 4.2,
-      ),
-      Paint()
-        ..color = const Color(0x28352d23)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
-    );
+    if (corner == null) {
+      c.drawOval(
+        Rect.fromCenter(
+          center: q + const Offset(0, 2),
+          width: 26 - pose.rise,
+          height: 4.2,
+        ),
+        Paint()
+          ..color = const Color(0x28352d23)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
+      );
+    }
     c.save();
     c.translate(q.dx, q.dy);
     final landing = ((visualTime - _landAt) / .28).clamp(0.0, 1.0);
@@ -740,30 +791,29 @@ class InkGame extends FlameGame {
         : (-session.vy / 250).clamp(0.0, 1.0);
     final rig = InkBodyRig(
       pose.rise + feet.bodyLift,
-      pose.lean + (session.grounded ? _groundAngle * .12 : 0),
-      pose.width + impact - falling * .05,
-      pose.height - impact + falling * .10,
+      corner != null
+          ? 0
+          : pose.lean + (session.grounded ? _groundAngle * .12 : 0),
+      corner != null ? 1 : pose.width + impact - falling * .05,
+      corner != null ? 1 : pose.height - impact + falling * .10,
     );
-    final grip = session.ledge;
-    if (grip != null) {
+    if (gripping) {
       final hand = point(grip.corner) - q;
-      final shoulder = rig.point(18, -13);
-      final arm = Path()
-        ..moveTo(shoulder.$1, shoulder.$2)
-        ..quadraticBezierTo(hand.dx + 6, hand.dy + 10, hand.dx, hand.dy - 1);
-      c.drawPath(
-        arm,
-        Paint()
-          ..color = const Color(0xff302b26)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.4
-          ..strokeCap = StrokeCap.round,
+      final arm = InkLedgeArmPose(hand.dx, hand.dy, rise);
+      c.save();
+      c.translate(InkLedgeArmPose.shoulderX, InkLedgeArmPose.shoulderY);
+      c.rotate(arm.angle);
+      c.scale(arm.lengthScale, 1);
+      c.rotate(-InkLedgeArmPose.baseAngle);
+      c.translate(-InkLedgeArmPose.shoulderX, -InkLedgeArmPose.shoulderY);
+      c.clipPath(_frontArmMask);
+      c.drawImageRect(
+        dot,
+        src,
+        const Rect.fromLTWH(-27, -47.52, 54, 54),
+        Paint()..filterQuality = FilterQuality.medium,
       );
-      c.drawCircle(
-        hand - const Offset(0, 1),
-        2.6,
-        Paint()..color = const Color(0xff302b26),
-      );
+      c.restore();
     }
     void foot(
       InkFootPose p,
@@ -774,9 +824,18 @@ class InkGame extends FlameGame {
       final x = placement.x, y = placement.y;
       final joint = rig.point(hip, -9);
       final curve = InkLegCurve(joint, (x, y - 1.2));
-      final path = Path()
-        ..moveTo(joint.$1, joint.$2)
-        ..cubicTo(
+      final path = Path()..moveTo(joint.$1, joint.$2);
+      if (corner != null && front && placement.x > 10) {
+        // Tuck the knee below the hip while the existing front foot steps onto
+        // the rim; a straight diagonal would look like another drawn line.
+        path.quadraticBezierTo(
+          joint.$1 + 2,
+          math.max(joint.$2 + 6, curve.ankle.$2 + 3),
+          curve.ankle.$1,
+          curve.ankle.$2,
+        );
+      } else {
+        path.cubicTo(
           curve.first.$1,
           curve.first.$2,
           curve.second.$1,
@@ -784,12 +843,13 @@ class InkGame extends FlameGame {
           curve.ankle.$1,
           curve.ankle.$2,
         );
+      }
       c.drawPath(
         path,
         Paint()
           ..color = front ? const Color(0xff25221f) : const Color(0xff363029)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 3.7
+          ..strokeWidth = corner != null ? 2.8 : 3.7
           ..strokeCap = StrokeCap.round,
       );
       c.save();
@@ -798,8 +858,10 @@ class InkGame extends FlameGame {
       c.drawOval(
         Rect.fromCenter(
           center: const Offset(1.6, -1),
-          width: p.planted ? 8.5 : 7.2,
-          height: 3.1,
+          width: corner != null
+              ? (p.planted ? 7.2 : 6.4)
+              : (p.planted ? 8.5 : 7.2),
+          height: corner != null ? 2.6 : 3.1,
         ),
         Paint()..color = const Color(0xff27231f),
       );
@@ -822,6 +884,13 @@ class InkGame extends FlameGame {
     c.scale(rig.scaleX, rig.scaleY);
     // Keep one detailed body identity and animate the feet separately; no pose popping.
     c.clipRect(const Rect.fromLTRB(-35, -60, 35, -7));
+    if (gripping) {
+      final bodyMask = Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(const Rect.fromLTRB(-35, -60, 35, -7))
+        ..addPath(_frontArmMask, Offset.zero);
+      c.clipPath(bodyMask);
+    }
     c.drawImageRect(
       dot,
       src,

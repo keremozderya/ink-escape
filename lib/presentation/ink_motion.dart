@@ -144,3 +144,37 @@ class InkLegCurve {
   final (double, double) hip, ankle;
   late final (double, double) first, second;
 }
+
+/// Animate the atlas's own front arm. Its palm stays on the rim until the
+/// front foot takes over; the shoulder always remains attached to the body.
+class InkLedgeArmPose {
+  InkLedgeArmPose(double targetX, double targetY, double rise) {
+    final release = ((rise - .55) / .2).clamp(0.0, 1.0);
+    final ease = release * release * (3 - 2 * release);
+    final endX = targetX + (palmX - targetX) * ease;
+    final endY = targetY + (palmY - targetY) * ease;
+    final dx = endX - shoulderX, dy = endY - shoulderY;
+    angle = math.atan2(dy, dx);
+    lengthScale = math.sqrt(dx * dx + dy * dy) / armLength;
+  }
+  static const shoulderX = -27 + 312 * 54 / 443.5;
+  static const shoulderY = -47.52 + 300 * 54 / 443.5;
+  static const palmX = -27 + 347 * 54 / 443.5;
+  static const palmY = -47.52 + 285 * 54 / 443.5;
+  static final baseAngle = math.atan2(palmY - shoulderY, palmX - shoulderX);
+  static final armLength = math.sqrt(
+    math.pow(palmX - shoulderX, 2) + math.pow(palmY - shoulderY, 2),
+  );
+  late final double angle, lengthScale;
+
+  (double, double) transform(double x, double y) {
+    final dx = x - shoulderX, dy = y - shoulderY;
+    final along =
+        (dx * math.cos(baseAngle) + dy * math.sin(baseAngle)) * lengthScale;
+    final across = -dx * math.sin(baseAngle) + dy * math.cos(baseAngle);
+    return (
+      shoulderX + along * math.cos(angle) - across * math.sin(angle),
+      shoulderY + along * math.sin(angle) + across * math.cos(angle),
+    );
+  }
+}

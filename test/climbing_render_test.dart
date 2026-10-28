@@ -72,15 +72,21 @@ void main() {
         await game.onLoad();
         game.update(.5);
         await renderPose(game, 'grip-actual-hang');
-        for (var i = 0; i < 3; i++) {
+        final heldX = s.x;
+        for (var i = 0; i < 5; i++) {
           s.pullLedge();
           game.update(.2);
+          if (s.ledge != null) expect(s.x, heldX);
+          await renderPose(game, 'grip-native-${i + 1}');
         }
         await renderPose(game, 'grip-actual-pull');
-        for (var i = 0; i < 2; i++) {
-          s.pullLedge();
-          game.update(.2);
+        for (var frame = 0; frame < 240 && s.ledge != null; frame++) {
+          game.update(1 / 120);
+          expect(s.x, heldX);
         }
+        expect(s.ledge, isNull);
+        expect(s.cornerSupport, isNotNull);
+        await renderPose(game, 'grip-vertical-top');
         game.update(.6);
         expect(s.ledge, isNull);
         expect(s.grounded, isTrue);

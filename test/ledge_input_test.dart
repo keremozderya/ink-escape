@@ -67,10 +67,13 @@ void main() {
       await tester.pump();
       for (var i = 1; i < LedgeGrip.requiredPulls; i++) {
         await tester.tapAt(touch);
+        expect(s.ledge!.pulls, i + 1);
         state.game.update(.18);
         await tester.pump();
       }
-      expect(s.ledge?.pulls, LedgeGrip.requiredPulls);
+      if (s.ledge != null) {
+        expect(s.ledge!.pulls, LedgeGrip.requiredPulls);
+      }
       await capture(tester, key, 'ledge-pulling');
       state.game.update(1);
       await tester.pump();

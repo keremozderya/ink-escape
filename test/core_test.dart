@@ -374,7 +374,7 @@ void main() {
     'A short bridge leaves Dot hanging at a reachable corner until tapped',
     () {
       final s = game();
-      expect(draw(s, [const V(320, 0), const V(350, 0)]), isTrue);
+      expect(draw(s, [const V(320, 0), const V(360, 0)]), isTrue);
       s.advance(15);
       expect(s.phase, Phase.playing);
       expect(s.grounded, isFalse);
