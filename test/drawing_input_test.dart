@@ -9,6 +9,7 @@ import 'package:ink_escape/core/ink_model.dart';
 import 'package:ink_escape/core/save_journal.dart';
 import 'package:ink_escape/main.dart';
 import 'package:ink_escape/soundscape.dart';
+import 'package:ink_escape/presentation/drawing_lens.dart';
 
 void main() {
   for (final config in [
@@ -45,6 +46,7 @@ void main() {
         final store = MemoryStore();
         await tester.pumpWidget(
           InkEscapeApp(
+            languageCode: 'tr',
             session: s,
             journal: SaveJournal(store, 'input'),
             store: store,
@@ -77,7 +79,14 @@ void main() {
           point(const V(320, 0)),
           kind: config.$3,
         );
+        await tester.pump();
         expect(s.draft, isNotNull);
+        final lens = find.byKey(const ValueKey('ink-drawing-lens'));
+        expect(
+          lens,
+          config.$3 == PointerDeviceKind.touch ? findsOneWidget : findsNothing,
+        );
+        expect(s.draft!.points.first.distance(const V(320, 0)), lessThan(.01));
         final before = s.ink;
         for (var i = 1; i <= 30; i++) {
           final t = i / 30;
@@ -89,8 +98,26 @@ void main() {
         }
         expect(s.lines, isEmpty);
         expect(s.ink, greaterThanOrEqualTo(before));
+        if (config.$3 == PointerDeviceKind.touch) {
+          final lensRect = tester.getRect(lens);
+          final focus = point(const V(392, 0));
+          expect(
+            lensRect.overlaps(Rect.fromCircle(center: focus, radius: 28)),
+            isFalse,
+          );
+          expect((Offset.zero & config.$2).contains(lensRect.topLeft), isTrue);
+          expect(
+            (Offset.zero & config.$2).contains(lensRect.bottomRight),
+            isTrue,
+          );
+          expect(
+            tester.widget<InkDrawingLens>(find.byType(InkDrawingLens)).focus,
+            focus,
+          );
+        }
         await pen.up();
         await tester.pump();
+        expect(lens, findsNothing);
         expect(s.lines.length, 1, reason: s.message);
         expect(s.ink, lessThan(before));
         expect(tester.takeException(), isNull);

@@ -19,6 +19,10 @@ class PaperWorld {
   PaperWorld(this.garden, this.ruins, this.memories);
   final ui.Image garden, ruins;
   final List<PaperMemory> memories;
+  static const letterNote =
+      'The words I never said…\n\nMaybe one day we will meet\non the same page again.\n\nWith love,';
+  static const lectureNote =
+      'LECTURE NOTES   /   17 OCT\n\nv = dx / dt\nV = I · R\n\nTuesday: bring the sketchbook';
   final Map<bool, TextPainter> _notes = {};
   ui.Image? _fadedGarden;
 
@@ -208,9 +212,7 @@ class PaperWorld {
       letter,
       () => TextPainter(
         text: TextSpan(
-          text: letter
-              ? 'Sana söyleyemediklerim…\n\nBelki bir gün aynı sayfada\nyeniden buluşuruz.\n\nSevgilerle,'
-              : 'DERS NOTLARI   /   17.10\n\nv = dx / dt\nV = I · R\n\nSalı: eskiz defterini unutma',
+          text: letter ? letterNote : lectureNote,
           style: const TextStyle(
             fontFamily: 'Cormorant',
             fontSize: 12.5,

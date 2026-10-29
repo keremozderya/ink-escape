@@ -24,6 +24,7 @@ Future<GameScreenState> mountGame(
   addTearDown(tester.view.resetDevicePixelRatio);
   await loadArt(tester);
   Widget app = InkEscapeApp(
+    languageCode: 'tr',
     session: session,
     journal: SaveJournal(store, 'flow'),
     store: store,

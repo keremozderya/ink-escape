@@ -170,7 +170,7 @@ class Soundscape {
       _safe(
         pool.start(
           volume: name.startsWith('step')
-              ? .48
+              ? .62
               : name == 'crumb'
               ? .35
               : .72,

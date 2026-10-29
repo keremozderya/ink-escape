@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import '../l10n/ink_strings.dart';
 
 class StoryShot {
   const StoryShot(this.title, this.caption, this.seconds, this.source);
@@ -20,7 +21,7 @@ const openingShots = [
   ),
   StoryShot(
     'İlk damla',
-    'Önce Dots’u çizdi.',
+    'Önce Dot’u çizdi.',
     3,
     Rect.fromLTRB(512, 3, 765, 307),
   ),
@@ -74,7 +75,7 @@ const openingShots = [
   ),
   StoryShot(
     'İlk adım',
-    'Dots, ona ulaşmak için yola çıktı.',
+    'Dot, ona ulaşmak için yola çıktı.',
     3,
     Rect.fromLTRB(773, 644, 1145, 1021),
   ),
@@ -180,7 +181,7 @@ class _InkOpeningState extends State<InkOpening>
                   const SizedBox(width: 8),
                   TextButton(
                     onPressed: _finish,
-                    child: const Text('Hikâyeyi atla'),
+                    child: Text(InkStrings.of(context).t('Hikâyeyi atla')),
                   ),
                 ],
               ),
@@ -189,7 +190,8 @@ class _InkOpeningState extends State<InkOpening>
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Semantics(
-                  label: '${shot.title}. ${shot.caption}',
+                  label:
+                      '${InkStrings.of(context).t(shot.title)}. ${InkStrings.of(context).t(shot.caption)}',
                   image: true,
                   child: CustomPaint(
                     painter: StoryFramePainter(
@@ -207,7 +209,7 @@ class _InkOpeningState extends State<InkOpening>
               child: Column(
                 children: [
                   Text(
-                    shot.title,
+                    InkStrings.of(context).t(shot.title),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontFamily: 'Cormorant',
@@ -219,7 +221,7 @@ class _InkOpeningState extends State<InkOpening>
                   SizedBox(
                     height: 68,
                     child: Text(
-                      shot.caption,
+                      InkStrings.of(context).t(shot.caption),
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 14,

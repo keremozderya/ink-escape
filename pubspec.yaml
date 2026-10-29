@@ -1,16 +1,19 @@
 name: ink_escape
 description: A hand-drawn journey. Native Android and iOS Flutter and Flame game.
 publish_to: none
-version: 0.3.0+3
+version: 0.3.1+4
 environment:
   sdk: '>=3.11.0 <4.0.0'
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   flame: 1.38.2
   flame_audio: 2.12.2
   shared_preferences: 2.5.6
   cupertino_icons: ^2.0.0
+  intl: ^0.20.3
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -21,6 +24,10 @@ flutter:
     - assets/data/
     - assets/images/
     - assets/audio/
+    - assets/fonts/InkArabic-OFL.txt
+    - assets/fonts/InkSC-OFL.txt
+    - assets/fonts/InkJP-OFL.txt
+    - assets/fonts/InkKR-OFL.txt
   fonts:
     - family: Nunito
       fonts:
@@ -28,3 +35,15 @@ flutter:
     - family: Cormorant
       fonts:
         - asset: assets/fonts/CormorantGaramond.ttf
+    - family: InkArabic
+      fonts:
+        - asset: assets/fonts/InkArabic.ttf
+    - family: InkSC
+      fonts:
+        - asset: assets/fonts/InkSC.ttf
+    - family: InkJP
+      fonts:
+        - asset: assets/fonts/InkJP.ttf
+    - family: InkKR
+      fonts:
+        - asset: assets/fonts/InkKR.ttf

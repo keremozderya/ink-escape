@@ -5,6 +5,7 @@
 build/
 dist/
 coverage/
+qa/
 .pub-cache/
 .pub/
 .idea/

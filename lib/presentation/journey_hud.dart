@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../l10n/ink_strings.dart';
 
 /// Read-only paper ruler: never intercepts the player's drawing gestures.
 class InkJourneyHud extends StatelessWidget {
@@ -18,14 +19,20 @@ class InkJourneyHud extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const ink = Color(0xff38312a), pencil = Color(0xff827563);
-    final distance = distanceCm.toStringAsFixed(1).replaceAll('.', ',');
+    final l = InkStrings.of(context);
+    final distance = l.distance(distanceCm);
     final fraction = progress.clamp(0.0, 1.0).toDouble();
     final f = scale;
     return IgnorePointer(
       child: Semantics(
-        label:
-            'Kat edilen yol $distance santimetre. '
-            'Bölüm $level, yüzde ${(fraction * 100).floor()} tamamlandı.',
+        label: l.t(
+          'Kat edilen yol {distance} santimetre. Bölüm {level}, yüzde {percent} tamamlandı.',
+          {
+            'distance': distance,
+            'level': level,
+            'percent': (fraction * 100).floor(),
+          },
+        ),
         child: ExcludeSemantics(
           child: SizedBox(
             key: const ValueKey('ink-journey-hud'),
@@ -58,7 +65,7 @@ class InkJourneyHud extends StatelessWidget {
                                   ),
                                 ),
                                 TextSpan(
-                                  text: ' cm',
+                                  text: ' ${l.t('cm')}',
                                   style: TextStyle(
                                     fontSize: 12 * f,
                                     color: pencil,
@@ -86,10 +93,10 @@ class InkJourneyHud extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      'LEVEL',
+                      l.t('LEVEL'),
                       style: TextStyle(
                         fontSize: 9 * f,
-                        letterSpacing: 1.7 * f,
+                        letterSpacing: l.tracking(1.7 * f),
                         fontWeight: FontWeight.w600,
                         color: pencil,
                       ),

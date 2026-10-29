@@ -43,7 +43,7 @@ class InkWalkPose {
       final ease = swing * swing * (3 - 2 * swing);
       return InkFootPose(
         idleX + (-10 + 20 * ease - idleX) * weight,
-        6.2 * math.pow(math.sin(math.pi * swing), 2) * weight,
+        4.8 * math.pow(math.sin(math.pi * swing), 2) * weight,
         false,
       );
     }
@@ -54,13 +54,54 @@ class InkWalkPose {
     return InkWalkPose(
       foot(0),
       foot(.5),
-      blend(.4 * (1 + breath), 1.45 * (1 - contact)),
-      blend(1 - .009 * breath, 1 + .035 * contact),
-      blend(1 + .012 * breath, 1 - .036 * contact),
+      blend(.4 * (1 + breath), .9 * (1 - contact)),
+      blend(1 - .004 * breath, 1 + .012 * contact),
+      blend(1 + .005 * breath, 1 - .014 * contact),
       grounded
           ? blend(.006 * breath, .035 + .025 * math.sin(phase * 2 * math.pi))
           : -.08,
     );
+  }
+
+  static InkWalkPose mix(InkWalkPose a, InkWalkPose b, double t) {
+    double v(double x, double y) => x + (y - x) * t;
+    InkFootPose foot(InkFootPose x, InkFootPose y) => InkFootPose(
+      v(x.x, y.x),
+      v(x.lift, y.lift),
+      t < .5 ? x.planted : y.planted,
+    );
+    return InkWalkPose(
+      foot(a.back, b.back),
+      foot(a.front, b.front),
+      v(a.rise, b.rise),
+      v(a.width, b.width),
+      v(a.height, b.height),
+      v(a.lean, b.lean),
+    );
+  }
+}
+
+/// Frame-rate independent presentation weights. Physics and saved state never
+/// depend on these values; pausing freezes them along with the animation clock.
+class InkAnimationBlend {
+  double support = 1, grip = 0, fall = 0;
+  void reset({required bool grounded, required bool gripping}) {
+    support = grounded ? 1 : 0;
+    grip = gripping ? 1 : 0;
+    fall = 0;
+  }
+
+  void advance(
+    double dt, {
+    required bool grounded,
+    required bool gripping,
+    required double vy,
+  }) {
+    final blend = 1 - math.exp(-18 * math.max(0, dt));
+    support += ((grounded ? 1.0 : 0.0) - support) * blend;
+    grip += ((gripping ? 1.0 : 0.0) - grip) * blend;
+    final target = grounded || gripping ? 0.0 : (-vy / 250).clamp(0.0, 1.0);
+    fall += (target - fall) * blend;
   }
 }
 
@@ -75,6 +116,17 @@ class InkGroundPose {
   const InkGroundPose(this.back, this.front, this.bodyLift);
   final InkFootPlacement back, front;
   final double bodyLift;
+
+  static InkGroundPose mix(InkGroundPose a, InkGroundPose b, double t) {
+    double v(double x, double y) => x + (y - x) * t;
+    InkFootPlacement foot(InkFootPlacement x, InkFootPlacement y) =>
+        InkFootPlacement(v(x.x, y.x), v(x.y, y.y), v(x.angle, y.angle));
+    return InkGroundPose(
+      foot(a.back, b.back),
+      foot(a.front, b.front),
+      v(a.bodyLift, b.bodyLift),
+    );
+  }
 
   static double strideForAngle(double angle) => 1 - .55 * math.sin(angle).abs();
 
@@ -129,6 +181,14 @@ class InkBodyRig {
     return (
       xx * math.cos(angle) - yy * math.sin(angle),
       xx * math.sin(angle) + yy * math.cos(angle) - raise,
+    );
+  }
+
+  (double, double) inverse(double x, double y) {
+    final yy = y + raise;
+    return (
+      (x * math.cos(angle) + yy * math.sin(angle)) / scaleX,
+      (-x * math.sin(angle) + yy * math.cos(angle)) / scaleY,
     );
   }
 }

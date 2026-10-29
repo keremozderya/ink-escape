@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/ink_model.dart';
@@ -14,6 +16,8 @@ import 'presentation/opening_story.dart';
 import 'presentation/journey_hud.dart';
 import 'presentation/centered_menu.dart';
 import 'presentation/drawing_tutorial.dart';
+import 'presentation/drawing_lens.dart';
+import 'l10n/ink_strings.dart';
 
 const paper = Color(0xfff6f1e6),
     inkColor = Color(0xff38312a),
@@ -81,11 +85,20 @@ Future<void> main() async {
     session.resetEpoch = journal.epoch + 1;
   }
   final sound = Soundscape();
+  var language = InkStrings.resolve(
+    WidgetsBinding.instance.platformDispatcher.locale.languageCode,
+  );
   try {
     sound.musicOn = await store.read('ink.settings.music') != 'off';
     sound.effectsOn = await store.read('ink.settings.effects') != 'off';
   } catch (_) {
     // Optional audio preferences must not prevent a recovered game opening.
+  }
+  try {
+    final savedLanguage = await store.read('ink.settings.language');
+    if (savedLanguage != null) language = InkStrings.resolve(savedLanguage);
+  } catch (_) {
+    // A damaged optional preference falls back to the device language.
   }
   runApp(
     InkEscapeApp(
@@ -93,6 +106,7 @@ Future<void> main() async {
       journal: journal,
       store: store,
       sound: sound,
+      languageCode: language,
       restored: saved != null,
       camera: session.migratedLayout
           ? null
@@ -125,7 +139,7 @@ class MemoryStore extends StringStore {
   }
 }
 
-class InkEscapeApp extends StatelessWidget {
+class InkEscapeApp extends StatefulWidget {
   const InkEscapeApp({
     super.key,
     required this.session,
@@ -135,6 +149,7 @@ class InkEscapeApp extends StatelessWidget {
     this.restored = false,
     this.camera,
     this.storageError,
+    this.languageCode,
   });
   final InkSession session;
   final SaveJournal journal;
@@ -143,13 +158,65 @@ class InkEscapeApp extends StatelessWidget {
   final bool restored;
   final double? camera;
   final String? storageError;
+  final String? languageCode;
+  @override
+  State<InkEscapeApp> createState() => _InkEscapeAppState();
+}
+
+class _InkEscapeAppState extends State<InkEscapeApp> {
+  late String _language;
+  bool _languageSelected = false;
+  Future<void> _languageWrite = Future.value();
+  @override
+  void initState() {
+    super.initState();
+    _language = InkStrings.resolve(
+      widget.languageCode ??
+          WidgetsBinding.instance.platformDispatcher.locale.languageCode,
+    );
+    if (widget.languageCode == null) unawaited(_restoreLanguage());
+  }
+
+  Future<void> _restoreLanguage() async {
+    try {
+      final saved = await widget.store.read('ink.settings.language');
+      if (mounted && !_languageSelected && saved != null) {
+        setState(() => _language = InkStrings.resolve(saved));
+      }
+    } catch (_) {
+      // Optional settings cannot block opening a recovered game.
+    }
+  }
+
+  void _setLanguage(String language) {
+    _languageSelected = true;
+    final next = InkStrings.resolve(language);
+    setState(() => _language = next);
+    _languageWrite = _languageWrite
+        .then((_) => widget.store.write('ink.settings.language', next))
+        .catchError((_) {});
+  }
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     title: 'Ink Escape',
+    locale: Locale(_language),
+    supportedLocales: InkStrings.languages.map((l) => Locale(l.code)),
+    localizationsDelegates: const [
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    builder: (context, child) => InkLocale(
+      strings: InkStrings(_language),
+      onChanged: _setLanguage,
+      child: child!,
+    ),
     theme: ThemeData(
       useMaterial3: true,
       fontFamily: 'Nunito',
+      fontFamilyFallback: InkStrings(_language).fonts,
       scaffoldBackgroundColor: const Color(0xffe6dfd0),
       colorScheme: ColorScheme.fromSeed(
         seedColor: const Color(0xff74634e),
@@ -158,13 +225,13 @@ class InkEscapeApp extends StatelessWidget {
       textTheme: const TextTheme(bodyMedium: TextStyle(color: inkColor)),
     ),
     home: GameScreen(
-      session: session,
-      journal: journal,
-      store: store,
-      sound: sound,
-      restored: restored,
-      camera: camera,
-      storageError: storageError,
+      session: widget.session,
+      journal: widget.journal,
+      store: widget.store,
+      sound: widget.sound,
+      restored: widget.restored,
+      camera: widget.camera,
+      storageError: widget.storageError,
     ),
   );
 }
@@ -194,8 +261,12 @@ class GameScreen extends StatefulWidget {
 class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   late final InkGame game;
   InkSession get s => widget.session;
+  InkStrings get strings => InkStrings.of(context);
+  String _t(String source, [Map<String, Object> args = const {}]) =>
+      strings.t(source, args);
   bool _loading = true, _settings = false, _saved = false, _saveError = false;
   int? _pointer, _pullPointer;
+  Offset? _drawFocus;
   bool _opening = false, _openingSeen = false;
   bool _mainMenu = false;
   bool _teachingDraw = false;
@@ -217,6 +288,12 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   }
 
   Timer? _saveIndicator;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    game.strings = strings;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -282,6 +359,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     widget.sound.pause();
     _pointer = null;
     _pullPointer = null;
+    _drawFocus = null;
     if (mounted) {
       setState(() => _settings = false);
     }
@@ -293,6 +371,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     widget.sound.pause();
     _pointer = null;
     _pullPointer = null;
+    _drawFocus = null;
     setState(() {
       _mainMenu = true;
       _settings = false;
@@ -348,6 +427,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   void _retry({bool newJourney = false}) {
     _pointer = null;
     _pullPointer = null;
+    _drawFocus = null;
     game.cameraX = -96;
     if (newJourney) {
       s.restartJourney();
@@ -400,13 +480,20 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                           }
                           if (s.beginStroke(game.worldPoint(e.localPosition))) {
                             _pointer = e.pointer;
-                            if (_drawingLessonActive) setState(() {});
+                            setState(() {
+                              _drawFocus = e.kind == PointerDeviceKind.touch
+                                  ? e.localPosition
+                                  : null;
+                            });
                           }
                         }
                       },
                       onPointerMove: (e) {
                         if (e.pointer == _pointer) {
                           s.moveStroke(game.worldPoint(e.localPosition));
+                          if (_drawFocus != null) {
+                            setState(() => _drawFocus = e.localPosition);
+                          }
                         }
                       },
                       onPointerUp: (e) {
@@ -423,6 +510,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                             unawaited(_save());
                           }
                           _pointer = null;
+                          _drawFocus = null;
                           setState(() {});
                         }
                       },
@@ -435,15 +523,18 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         if (e.pointer == _pointer) {
                           s.losePointer();
                           _pointer = null;
+                          _drawFocus = null;
                           widget.sound.pause();
                           setState(() {});
                         }
                       },
                       child: GameWidget(
                         game: game,
-                        loadingBuilder: (_) => const ColoredBox(
+                        loadingBuilder: (_) => ColoredBox(
                           color: paper,
-                          child: Center(child: Text('Kâğıtlar hazırlanıyor…')),
+                          child: Center(
+                            child: Text(_t('Kâğıtlar hazırlanıyor…')),
+                          ),
                         ),
                       ),
                     ),
@@ -540,7 +631,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                               widget.sound.resume();
                               setState(() {});
                             },
-                            child: const Text('Bu çizgiden vazgeç'),
+                            child: Text(_t('Bu çizgiden vazgeç')),
                           ),
                         ],
                       ),
@@ -556,6 +647,19 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                     ),
                   if (!_loading && showMenu)
                     Positioned.fill(child: _overlay(factor)),
+                  if (_drawFocus != null &&
+                      s.draft != null &&
+                      s.phase == Phase.playing &&
+                      !showMenu &&
+                      !_opening)
+                    InkDrawingLens(
+                      game: game,
+                      focus: _drawFocus!,
+                      viewport: constraints.biggest,
+                      label: _t('Çizim büyüteci'),
+                      costLabel:
+                          '${pathLength(s.validatedDraft().$1 ?? smoothStroke(s.draft!.points)).ceil()} ${_t('Ink')}',
+                    ),
                   if (_opening && !_loading)
                     Positioned.fill(
                       child: InkOpening(
@@ -569,7 +673,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       right: 18,
                       bottom: 6,
                       child: Text(
-                        widget.storageError ?? 'Kayıt yazılamadı.',
+                        _t(widget.storageError ?? 'Kayıt yazılamadı.'),
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 10 * factor,
@@ -591,7 +695,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     return Center(
       child: Semantics(
         liveRegion: true,
-        label: '$remaining saniye. Dot ilerleyemiyor.',
+        label: _t('{n} saniye. Dot ilerleyemiyor.', {'n': remaining}),
         child: ExcludeSemantics(
           child: Container(
             key: const ValueKey('ink-stuck-countdown'),
@@ -620,7 +724,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                 ),
                 SizedBox(height: 3 * f),
                 Text(
-                  'Dot ilerleyemiyor',
+                  _t('Dot ilerleyemiyor'),
                   style: TextStyle(fontSize: 13 * f, color: muted),
                 ),
               ],
@@ -636,8 +740,10 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     return Center(
       child: Semantics(
         liveRegion: true,
-        label:
-            'Dot köşeye tutundu. Ekrana basıp bırak. $pulls / ${LedgeGrip.requiredPulls}',
+        label: _t('Dot köşeye tutundu. Ekrana basıp bırak. {n} / {total}', {
+          'n': pulls,
+          'total': LedgeGrip.requiredPulls,
+        }),
         child: ExcludeSemantics(
           child: Container(
             key: const ValueKey('ink-ledge-warning'),
@@ -651,7 +757,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Dot köşeye tutundu',
+                  _t('Dot köşeye tutundu'),
                   style: TextStyle(
                     fontFamily: 'Cormorant',
                     fontSize: 25 * f,
@@ -661,13 +767,15 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                 ),
                 Text(
                   pulls < LedgeGrip.requiredPulls
-                      ? 'Bas–çek yaparak tırman'
-                      : 'Dot tırmanıyor…',
+                      ? _t('Bas–çek yaparak tırman')
+                      : _t('Dot tırmanıyor…'),
                   style: TextStyle(fontSize: 14 * f, color: muted),
                 ),
                 if (!s.ledgeTutorialDone)
                   Text(
-                    'Ekrana ${LedgeGrip.requiredPulls - pulls} kez basıp bırak. Basılı tutmak sayılmaz.',
+                    _t('Ekrana {n} kez basıp bırak. Basılı tutmak sayılmaz.', {
+                      'n': LedgeGrip.requiredPulls - pulls,
+                    }),
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12 * f, color: muted),
                   ),
@@ -701,7 +809,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Semantics(
-          label: 'Mürekkep ${s.ink.floor()}, en fazla 240',
+          label: _t('Mürekkep {n}, en fazla 240', {'n': s.ink.floor()}),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -786,7 +894,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
         ),
         if (s.phase == Phase.playing || s.phase == Phase.resumeStroke)
           IconButton(
-            tooltip: 'Duraklat',
+            tooltip: _t('Duraklat'),
             onPressed: _pause,
             icon: Icon(Icons.pause_rounded, color: inkColor, size: 25 * f),
           ),
@@ -795,7 +903,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   }
 
   Widget _instruction(String text, double f) => Text(
-    text,
+    _t(text),
     textAlign: TextAlign.center,
     style: TextStyle(
       fontSize: 14 * f,
@@ -824,14 +932,14 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                 ),
               ),
               child: Text(
-                text,
+                _t(text),
                 style: TextStyle(fontSize: 15 * f, fontWeight: FontWeight.w700),
               ),
             )
           : TextButton(
               onPressed: onTap,
               child: Text(
-                text,
+                _t(text),
                 style: TextStyle(fontSize: 13 * f, color: muted),
               ),
             ),
@@ -842,7 +950,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
         dead = s.phase == Phase.dead,
         complete = s.phase == Phase.complete;
     final title = _settings
-        ? 'Sesler'
+        ? 'Ayarlar'
         : ready
         ? 'INK ESCAPE'
         : dead
@@ -850,32 +958,32 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
         : complete
         ? 'İlk izler tamam.'
         : _settings
-        ? 'Sesler'
+        ? 'Ayarlar'
         : 'Küçük bir mola.';
     String subtitle;
     if (_settings) {
-      subtitle = 'Kâğıdın sesini kendine göre ayarla.';
+      subtitle = 'Ses ve dil seçeneklerini kendine göre ayarla.';
     } else if (ready) {
       subtitle = s.lab
-          ? '${s.level.title}\n${s.level.rain.isNotEmpty
+          ? '${_t(s.level.title)}\n${_t(s.level.rain.isNotEmpty
                 ? 'Yolun üstüne koruyucu bir çatı çiz.'
                 : s.level.balls.isNotEmpty
                 ? 'Bilyeyi çiçekli yuvaya ulaştır.'
-                : 'İki boşluk için çizgilerini sırayla kullan.'}'
+                : 'İki boşluk için çizgilerini sırayla kullan.')}'
           : widget.restored || s.x > 0
           ? (s.migratedLayout
                 ? 'Parkur yenilendi. Tamamladığın bölümler korundu;\nmevcut bölümün başından devam edeceksin.'
                 : 'Kâğıt seni bekliyor.')
           : 'Her çizgi, biraz daha yakın.';
     } else if (dead) {
-      subtitle = s.message;
+      subtitle = _t(s.message);
     } else if (complete) {
       subtitle = s.lab
           ? 'Bu mekanik denemesi tamamlandı.'
           : 'İlk iki bölümün sonuna ulaştın.\nYolculuğun bu ilk taslağı burada bitiyor.';
     } else {
       subtitle = _settings
-          ? 'Kâğıdın sesini kendine göre ayarla.'
+          ? 'Ses ve dil seçeneklerini kendine göre ayarla.'
           : 'Bıraktığın her iz yerinde.';
     }
     return TweenAnimationBuilder<double>(
@@ -906,16 +1014,18 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                   children: [
                     if (ready)
                       Text(
-                        s.lab ? 'MEKANİK DENEMESİ' : 'BİR MÜREKKEP YOLCULUĞU',
+                        _t(
+                          s.lab ? 'MEKANİK DENEMESİ' : 'BİR MÜREKKEP YOLCULUĞU',
+                        ),
                         style: TextStyle(
                           fontSize: 10 * f,
-                          letterSpacing: 3 * f,
+                          letterSpacing: strings.tracking(3 * f),
                           color: muted,
                         ),
                       ),
                     SizedBox(height: ready ? 16 * f : 0),
                     Text(
-                      title,
+                      _t(title),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontFamily: 'Cormorant',
@@ -928,7 +1038,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                     ),
                     SizedBox(height: 17 * f),
                     Text(
-                      subtitle,
+                      _t(subtitle),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 14 * f,
@@ -940,9 +1050,37 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                     if (_settings) ...[
                       SizedBox(
                         width: 285 * f,
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey('ink-language-${strings.code}'),
+                          initialValue: strings.code,
+                          isExpanded: true,
+                          decoration: InputDecoration(labelText: _t('Dil')),
+                          items: InkStrings.languages
+                              .map(
+                                (language) => DropdownMenuItem(
+                                  value: language.code,
+                                  child: Text(
+                                    language.name,
+                                    textDirection: language.code == 'ar'
+                                        ? TextDirection.rtl
+                                        : TextDirection.ltr,
+                                    style: TextStyle(fontSize: 14 * f),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              InkLocale.of(context)?.onChanged?.call(value);
+                            }
+                          },
+                        ),
+                      ),
+                      SizedBox(
+                        width: 285 * f,
                         child: SwitchListTile(
                           title: Text(
-                            'Yumuşak müzik',
+                            _t('Yumuşak müzik'),
                             style: TextStyle(fontSize: 14 * f),
                           ),
                           value: widget.sound.musicOn,
@@ -962,7 +1100,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         width: 285 * f,
                         child: SwitchListTile(
                           title: Text(
-                            'Kalem ve dünya sesleri',
+                            _t('Kalem ve dünya sesleri'),
                             style: TextStyle(fontSize: 14 * f),
                           ),
                           value: widget.sound.effectsOn,
@@ -1001,7 +1139,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                           primary: false,
                         ),
                       _button(
-                        'Ses ayarları',
+                        'Ayarlar',
                         () => setState(() => _settings = true),
                         f,
                         primary: false,
@@ -1012,7 +1150,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         _start();
                       }, f),
                       Text(
-                        'Bu bölümün başlangıcından.',
+                        _t('Bu bölümün başlangıcından.'),
                         style: TextStyle(fontSize: 11 * f, color: muted),
                       ),
                     ] else if (complete) ...[
@@ -1022,7 +1160,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                     ] else ...[
                       _button('Devam et', _start, f),
                       _button(
-                        'Ses ayarları',
+                        'Ayarlar',
                         () => setState(() => _settings = true),
                         f,
                         primary: false,
@@ -1037,7 +1175,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                     if (ready && !_settings) ...[
                       SizedBox(height: 12 * f),
                       Text(
-                        'Dot kendi yürür. Sen ona bir yol çiz.',
+                        _t('Dot kendi yürür. Sen ona bir yol çiz.'),
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 13 * f, color: muted),
                       ),

@@ -8,6 +8,7 @@ import 'core/ink_model.dart';
 import 'presentation/ink_death.dart';
 import 'presentation/ink_motion.dart';
 import 'presentation/paper_world.dart';
+import 'l10n/ink_strings.dart';
 
 class InkGame extends FlameGame {
   InkGame(
@@ -22,6 +23,7 @@ class InkGame extends FlameGame {
   final void Function(String)? onEffect;
   final double? initialCamera;
   final bool Function()? holdForLesson;
+  InkStrings strings = const InkStrings('en');
   late ui.Image dot, props, garden, openingArt;
   late PaperWorld paperWorld;
   bool sceneReady = false;
@@ -31,6 +33,9 @@ class InkGame extends FlameGame {
   double _origin = 0;
   double _landAt = -10;
   double _lastWalked = 0, _gaitDistance = 0, _movement = 0, _groundAngle = 0;
+  final _animation = InkAnimationBlend();
+  V? _lastCorner;
+  V _frameStart = const V(0, 0), _catchOffset = const V(0, 0);
   double? _gateAt;
   final Map<String, double> _lineBorn = {};
   final List<InkPickupFlight> _flights = [];
@@ -115,6 +120,13 @@ class InkGame extends FlameGame {
     _gaitDistance = session.walked;
     _movement = 0;
     _groundAngle = math.atan(session.groundSlope);
+    _animation.reset(
+      grounded: session.grounded,
+      gripping: session.ledge != null || session.cornerSupport != null,
+    );
+    _lastCorner = session.ledge?.corner ?? session.cornerSupport;
+    _frameStart = V(session.x, session.y);
+    _catchOffset = const V(0, 0);
   }
 
   void _cacheNext() {
@@ -152,7 +164,9 @@ class InkGame extends FlameGame {
   void effect(String name, V at) {
     onEffect?.call(name);
     if (name == 'land') _landAt = visualTime;
-    if (name == 'ledgeGrab') cameraX = session.x - 96;
+    if (name == 'ledgeGrab') {
+      _catchOffset = _frameStart + _catchOffset - V(session.x, session.y);
+    }
     if (name == 'death') {
       deadAge = 0;
       particles.clear();
@@ -203,6 +217,7 @@ class InkGame extends FlameGame {
     }
     final step = math.max(0.0, dt);
     if (session.phase == Phase.playing) {
+      _frameStart = V(session.x, session.y);
       if (holdForLesson?.call() ?? false) {
         // The first lesson holds physics, not the five-second save guarantee.
         _lessonSaveElapsed += step;
@@ -225,6 +240,15 @@ class InkGame extends FlameGame {
       _gaitDistance += moved / stride;
       final moving = moved > 1e-7 && session.grounded ? 1.0 : 0.0;
       _movement += (moving - _movement) * blend;
+      final corner = session.ledge?.corner ?? session.cornerSupport;
+      if (corner != null) _lastCorner = corner;
+      _animation.advance(
+        step,
+        grounded: session.grounded,
+        gripping: corner != null,
+        vy: session.vy,
+      );
+      _catchOffset = _catchOffset * math.exp(-20 * step);
       visualTime += step;
       cameraX += (session.x - 96 - cameraX) * (1 - math.exp(-10 * step));
       for (final p in particles) {
@@ -459,7 +483,7 @@ class InkGame extends FlameGame {
       );
       _text(
         canvas,
-        '${pathLength(valid ?? smoothStroke(draft.points)).ceil()} Ink',
+        '${pathLength(valid ?? smoothStroke(draft.points)).ceil()} ${strings.t('Ink')}',
         p + const Offset(8, -28),
         size: 13,
         color: color,
@@ -711,7 +735,7 @@ class InkGame extends FlameGame {
 
   void _dot(Canvas c) {
     final dead = session.phase == Phase.dead;
-    final position = point(V(session.x, session.y));
+    final position = point(V(session.x, session.y) + _catchOffset);
     // Falling deaths finish below the viewport. Keep the last ink splash at
     // its edge so that the effect remains visible before the retry menu.
     final q = dead
@@ -728,8 +752,10 @@ class InkGame extends FlameGame {
     final walking =
         (session.phase == Phase.playing || dead) && session.grounded;
     final grip = session.ledge;
-    final corner = grip?.corner ?? session.cornerSupport;
-    final gripping = grip != null;
+    final corner =
+        grip?.corner ??
+        session.cornerSupport ??
+        (_animation.grip > .001 ? _lastCorner : null);
     final edging = session.cornerSupport != null;
     final rise = grip == null
         ? 1.0
@@ -755,9 +781,41 @@ class InkGame extends FlameGame {
         return at == null ? null : (at.x - session.x, at.y - session.y);
       },
     );
+    final airPose = InkWalkPose.sample(
+      _gaitDistance,
+      grounded: false,
+      walking: false,
+    );
+    final airFeet = InkGroundPose.place(
+      airPose,
+      grounded: false,
+      angle: 0,
+      stride: 1,
+      sampleGround: (_) => null,
+    );
+    if (session.grounded) {
+      pose = InkWalkPose.mix(airPose, pose, _animation.support);
+      feet = InkGroundPose.mix(airFeet, feet, _animation.support);
+    } else {
+      final standing = InkWalkPose.sample(
+        _gaitDistance,
+        grounded: true,
+        walking: false,
+        time: visualTime,
+      );
+      final standingFeet = InkGroundPose.place(
+        standing,
+        grounded: false,
+        angle: 0,
+        stride: 1,
+        sampleGround: (_) => null,
+      );
+      pose = InkWalkPose.mix(airPose, standing, _animation.support);
+      feet = InkGroundPose.mix(airFeet, standingFeet, _animation.support);
+    }
     if (corner != null) {
       final plant = edging ? 1.0 : ((rise - .25) / .35).clamp(0.0, 1.0);
-      pose = InkWalkPose(
+      final climbingPose = InkWalkPose(
         const InkFootPose(-4, 2, false),
         InkFootPose(6, 1, plant >= 1),
         0,
@@ -765,7 +823,7 @@ class InkGame extends FlameGame {
         1,
         0,
       );
-      feet = InkGroundPose(
+      final climbingFeet = InkGroundPose(
         const InkFootPlacement(-4, -2, 0),
         InkFootPlacement(
           6 + (corner.x - session.x + 2 - 6) * plant,
@@ -774,6 +832,8 @@ class InkGame extends FlameGame {
         ),
         0,
       );
+      pose = InkWalkPose.mix(pose, climbingPose, _animation.grip);
+      feet = InkGroundPose.mix(feet, climbingFeet, _animation.grip);
     }
     final sw = dot.width / 4, sh = dot.height / 2;
     final src = Rect.fromLTWH(0, 0, sw, sh);
@@ -803,22 +863,40 @@ class InkGame extends FlameGame {
     c.save();
     c.translate(q.dx, q.dy);
     final landing = ((visualTime - _landAt) / .28).clamp(0.0, 1.0);
-    final impact = math.sin(landing * math.pi) * .10;
-    final falling = session.grounded
-        ? 0.0
-        : (-session.vy / 250).clamp(0.0, 1.0);
+    final impact = math.sin(landing * math.pi) * .035;
+    final falling = _animation.fall;
+    final free = 1 - _animation.grip;
     final rig = InkBodyRig(
       pose.rise + feet.bodyLift,
-      corner != null
-          ? 0
-          : pose.lean + (session.grounded ? _groundAngle * .12 : 0),
-      corner != null ? 1 : pose.width + impact - falling * .05,
-      corner != null ? 1 : pose.height - impact + falling * .10,
+      (pose.lean + _groundAngle * .12 * _animation.support) * free,
+      pose.width + (impact - falling * .025) * free,
+      pose.height + (-impact + falling * .045) * free,
     );
-    if (gripping) {
-      final hand = point(grip.corner) - q;
-      final arm = InkLedgeArmPose(hand.dx, hand.dy, rise);
+    {
+      final swing =
+          math.sin(_gaitDistance / 40 * 2 * math.pi) *
+          1.2 *
+          _movement *
+          _animation.support;
+      var hand = Offset(
+        InkLedgeArmPose.palmX + swing,
+        InkLedgeArmPose.palmY - falling * 3,
+      );
+      if (corner != null) {
+        final actual = point(corner) - q;
+        final local = rig.inverse(actual.dx, actual.dy);
+        final destination = InkLedgeArmPose(local.$1, local.$2, rise);
+        final palm = destination.transform(
+          InkLedgeArmPose.palmX,
+          InkLedgeArmPose.palmY,
+        );
+        hand = Offset.lerp(hand, Offset(palm.$1, palm.$2), _animation.grip)!;
+      }
+      final arm = InkLedgeArmPose(hand.dx, hand.dy, 0);
       c.save();
+      c.translate(0, -rig.raise);
+      c.rotate(rig.angle);
+      c.scale(rig.scaleX, rig.scaleY);
       c.translate(InkLedgeArmPose.shoulderX, InkLedgeArmPose.shoulderY);
       c.rotate(arm.angle);
       c.scale(arm.lengthScale, 1);
@@ -867,7 +945,7 @@ class InkGame extends FlameGame {
         Paint()
           ..color = front ? const Color(0xff25221f) : const Color(0xff363029)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = corner != null ? 2.8 : 3.7
+          ..strokeWidth = 3.7 - .9 * _animation.grip
           ..strokeCap = StrokeCap.round,
       );
       c.save();
@@ -876,10 +954,10 @@ class InkGame extends FlameGame {
       c.drawOval(
         Rect.fromCenter(
           center: const Offset(1.6, -1),
-          width: corner != null
-              ? (p.planted ? 7.2 : 6.4)
-              : (p.planted ? 8.5 : 7.2),
-          height: corner != null ? 2.6 : 3.1,
+          width:
+              (p.planted ? 8.5 : 7.2) -
+              (p.planted ? 1.3 : .8) * _animation.grip,
+          height: 3.1 - .5 * _animation.grip,
         ),
         Paint()..color = const Color(0xff27231f),
       );
@@ -902,7 +980,7 @@ class InkGame extends FlameGame {
     c.scale(rig.scaleX, rig.scaleY);
     // Keep one detailed body identity and animate the feet separately; no pose popping.
     c.clipRect(const Rect.fromLTRB(-35, -60, 35, -7));
-    if (gripping) {
+    {
       final bodyMask = Path()
         ..fillType = PathFillType.evenOdd
         ..addRect(const Rect.fromLTRB(-35, -60, 35, -7))
@@ -1064,12 +1142,20 @@ class InkGame extends FlameGame {
   }) {
     final text = TextPainter(
       text: TextSpan(
-        text: value,
-        style: TextStyle(fontFamily: 'Nunito', fontSize: size, color: color),
+        text: strings.t(value),
+        style: TextStyle(
+          fontFamily: 'Nunito',
+          fontFamilyFallback: strings.fonts,
+          fontSize: size,
+          color: color,
+        ),
       ),
-      textDirection: TextDirection.ltr,
+      textDirection: strings.code == 'ar'
+          ? TextDirection.rtl
+          : TextDirection.ltr,
     )..layout();
     text.paint(c, p);
+    text.dispose();
   }
 }
 

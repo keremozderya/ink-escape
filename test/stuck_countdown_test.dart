@@ -51,6 +51,7 @@ void main() {
       final store = MemoryStore();
       await tester.pumpWidget(
         InkEscapeApp(
+          languageCode: 'tr',
           session: session,
           journal: SaveJournal(store, 'countdown'),
           store: store,

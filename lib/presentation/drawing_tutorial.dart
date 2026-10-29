@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/ink_strings.dart';
 
 /// Contextual controls stay above the route; the drawing surface remains live.
 class InkDrawingTutorial extends StatelessWidget {
@@ -16,6 +17,7 @@ class InkDrawingTutorial extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = InkStrings.of(context);
     const titles = [
       'Kâğıt kenarından başla',
       'Yolunu çiz ve bırak',
@@ -43,7 +45,7 @@ class InkDrawingTutorial extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '${step + 1} / 3 · ${titles[step]}',
+              '${step + 1} / 3 · ${l.t(titles[step])}',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: 'Cormorant',
@@ -54,7 +56,7 @@ class InkDrawingTutorial extends StatelessWidget {
             ),
             SizedBox(height: 4 * scale),
             Text(
-              descriptions[step],
+              l.t(descriptions[step]),
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13 * scale,
@@ -65,14 +67,14 @@ class InkDrawingTutorial extends StatelessWidget {
             if (step == 2) ...[
               SizedBox(height: 4 * scale),
               Text(
-                'Kalan mürekkep: ${ink.floor()} / 240',
+                l.t('Kalan mürekkep: {n} / 240', {'n': ink.floor()}),
                 style: TextStyle(fontSize: 13 * scale),
               ),
             ],
             TextButton(
               key: const ValueKey('ink-lesson-done'),
               onPressed: onDone,
-              child: Text(step == 2 ? 'Yola devam' : 'Öğreticiyi geç'),
+              child: Text(l.t(step == 2 ? 'Yola devam' : 'Öğreticiyi geç')),
             ),
           ],
         ),
@@ -87,7 +89,9 @@ class InkTutorialAnchor extends StatelessWidget {
   @override
   Widget build(BuildContext context) => IgnorePointer(
     child: Semantics(
-      label: 'Çizime bu sabit kâğıt kenarından başla.',
+      label: InkStrings.of(
+        context,
+      ).t('Çizime bu sabit kâğıt kenarından başla.'),
       child: SizedBox(
         key: const ValueKey('ink-tutorial-anchor'),
         width: 34,

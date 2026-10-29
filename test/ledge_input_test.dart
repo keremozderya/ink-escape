@@ -23,6 +23,7 @@ void main() {
         RepaintBoundary(
           key: key,
           child: InkEscapeApp(
+            languageCode: 'tr',
             session: s,
             journal: SaveJournal(store, 'ledge-ui'),
             store: store,

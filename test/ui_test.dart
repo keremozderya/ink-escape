@@ -52,6 +52,7 @@ void main() {
         RepaintBoundary(
           key: key,
           child: InkEscapeApp(
+            languageCode: 'tr',
             session: s,
             journal: SaveJournal(store, 'ui'),
             store: store,
@@ -107,6 +108,7 @@ void main() {
         await pen.moveTo(touch(V(320 + 72 * t, 7 * 4 * t * (1 - t))));
         await tester.pump(const Duration(milliseconds: 16));
       }
+      await capture('drawing-lens');
       await pen.up();
       expect(s.draft, isNull);
       expect(
@@ -141,7 +143,7 @@ void main() {
       expect(s.draft, isNull);
       expect(tester.takeException(), isNull);
       await capture('03-pause');
-      await tester.tap(find.text('Ses ayarları'));
+      await tester.tap(find.text('Ayarlar'));
       await tester.pump();
       expect(find.text('Yumuşak müzik'), findsOneWidget);
       expect(tester.takeException(), isNull);

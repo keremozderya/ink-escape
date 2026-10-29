@@ -1086,6 +1086,7 @@ class InkSession {
           continue;
         }
       }
+      if (_stepOntoRaisedInk(segments)) continue;
       grounded = false;
       onNatural = false;
       vy = 0;
@@ -1128,8 +1129,68 @@ class InkSession {
     } else {
       x = next.x;
       y = next.y;
+      // A line can be finished just after Dot passes its first point. Recover
+      // only while his feet are still within one short step of the paper lip.
+      if (vy > -30 && _stepOntoRaisedInk(segments)) return;
       _tryGrip(previous, next, segments);
     }
+  }
+
+  static const inkStepHeight = 12.0;
+
+  /// Bridge a small drawing offset at a real paper edge. Never promote a roof
+  /// above a continuing floor, a distant floating stroke or a retired line.
+  bool _stepOntoRaisedInk(List<_GroundSegment> segments) {
+    _GroundSegment? lip;
+    for (final floor in segments) {
+      if (!floor.natural ||
+          x < floor.b.x - .001 ||
+          x > floor.b.x + 12 ||
+          y < floor.b.y - 4 ||
+          y > floor.b.y + inkStepHeight) {
+        continue;
+      }
+      final continuing = segments.any(
+        (next) =>
+            next.natural &&
+            next.contains(floor.b.x + .01) &&
+            (next.yAt(floor.b.x) - floor.b.y).abs() <= .75,
+      );
+      if (!continuing && (lip == null || floor.b.x > lip.b.x)) lip = floor;
+    }
+    if (lip == null) return false;
+    _GroundSegment? target;
+    var bestRise = double.infinity;
+    for (final floor in segments) {
+      if (floor.natural ||
+          !floor.contains(x) ||
+          floor.b.x <= x + .001 ||
+          floor.slope > maxClimbSlope) {
+        continue;
+      }
+      final height = floor.yAt(x);
+      final rise = height - lip.b.y;
+      if (rise <= .75 ||
+          rise > inkStepHeight ||
+          height < y - .75 ||
+          height - y > inkStepHeight + 4 ||
+          floor.a.x > lip.b.x + 2 ||
+          floor.b.x < lip.b.x ||
+          (floor.yAt(lip.b.x) - lip.b.y).abs() > inkStepHeight) {
+        continue;
+      }
+      if (rise < bestRise) {
+        target = floor;
+        bestRise = rise;
+      }
+    }
+    if (target == null) return false;
+    y = target.yAt(x);
+    vy = 0;
+    grounded = true;
+    onNatural = false;
+    emit('land');
+    return true;
   }
 
   void _tryGrip(V previous, V next, List<_GroundSegment> segments) {

@@ -10,6 +10,7 @@ import 'package:ink_escape/core/ink_model.dart';
 import 'package:ink_escape/core/save_journal.dart';
 import 'package:ink_escape/main.dart';
 import 'package:ink_escape/presentation/journey_hud.dart';
+import 'package:ink_escape/l10n/ink_strings.dart';
 import 'package:ink_escape/soundscape.dart';
 
 import 'journey_core_test.dart' show journeyLevels;
@@ -27,6 +28,10 @@ Future<void> loadArt(WidgetTester tester) async {
       'Nunito': 'assets/fonts/Nunito.ttf',
       'Cormorant': 'assets/fonts/CormorantGaramond.ttf',
       'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
+      'InkArabic': 'assets/fonts/InkArabic.ttf',
+      'InkSC': 'assets/fonts/InkSC.ttf',
+      'InkJP': 'assets/fonts/InkJP.ttf',
+      'InkKR': 'assets/fonts/InkKR.ttf',
     }.entries) {
       await (FontLoader(
         entry.key,
@@ -53,11 +58,14 @@ void main() {
   ) async {
     final semantics = tester.ensureSemantics();
     await tester.pumpWidget(
-      const MaterialApp(
-        home: Center(
-          child: SizedBox(
-            width: 320,
-            child: InkJourneyHud(distanceCm: 24.6, progress: .5, level: 2),
+      const InkLocale(
+        strings: InkStrings('tr'),
+        child: MaterialApp(
+          home: Center(
+            child: SizedBox(
+              width: 320,
+              child: InkJourneyHud(distanceCm: 24.6, progress: .5, level: 2),
+            ),
           ),
         ),
       ),
@@ -66,7 +74,7 @@ void main() {
       find.byKey(const ValueKey('ink-distance-cm')),
     );
     expect(distance.textSpan!.toPlainText(), '24,6 cm');
-    expect(find.text('LEVEL'), findsOneWidget);
+    expect(find.text('BÖLÜM'), findsOneWidget);
     expect(find.text('2'), findsOneWidget);
     expect(
       find.bySemanticsLabel(
@@ -75,7 +83,7 @@ void main() {
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
-      semantics.dispose();
+    semantics.dispose();
   });
 
   testWidgets('Journey does not intercept drawing beneath it', (tester) async {
@@ -145,6 +153,7 @@ void main() {
         RepaintBoundary(
           key: key,
           child: InkEscapeApp(
+            languageCode: 'tr',
             session: s,
             journal: SaveJournal(store, 'journey-ui'),
             store: store,
@@ -165,7 +174,7 @@ void main() {
       final timeBefore = state.game.visualTime;
       state.game.update(.01);
       // Notify Flutter immediately rather than waiting for the HUD's 50 ms refresh.
-    state.game.onFrame?.call();
+      state.game.onFrame?.call();
       await tester.pump();
       expect(s.phase, Phase.playing);
       expect(s.levelIndex, 1);

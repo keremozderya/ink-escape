@@ -77,6 +77,7 @@ void main() {
           RepaintBoundary(
             key: key,
             child: InkEscapeApp(
+              languageCode: 'tr',
               session: s,
               journal: SaveJournal(store, 'center-menu'),
               store: store,
@@ -120,8 +121,8 @@ void main() {
         state.game.onFrame?.call();
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
-        await tester.ensureVisible(find.text('Ses ayarları'));
-        await tester.tap(find.text('Ses ayarları'));
+        await tester.ensureVisible(find.text('Ayarlar'));
+        await tester.tap(find.text('Ayarlar'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
         expect(find.text('Yumuşak müzik'), findsOneWidget);
