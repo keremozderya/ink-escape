@@ -2,7 +2,21 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:ink_escape/core/ink_model.dart';
 
-void main() {
+void main(List<String> arguments) {
+  final revision = arguments
+      .where((value) => value.startsWith('--revision='))
+      .firstOrNull
+      ?.substring('--revision='.length);
+  final gitRevision = Process.runSync('git', ['rev-parse', 'HEAD']);
+  final sourcePaths = [
+    'lib/core/ink_model.dart',
+    'assets/data/prototype_levels.json',
+    'scripts/verify_routes.dart',
+  ];
+  final sourceHashes = Process.runSync('git', ['hash-object', ...sourcePaths]);
+  if (gitRevision.exitCode != 0 || sourceHashes.exitCode != 0) {
+    throw StateError('Route verification requires a Git checkout');
+  }
   final raw = jsonDecode(
     File('assets/data/prototype_levels.json').readAsStringSync(),
   );
@@ -71,8 +85,17 @@ void main() {
     });
   }
   final report = {
-    'prototype': '0.2',
-    'date': '2026-10-18',
+    'source_commit': revision ?? (gitRevision.stdout as String).trim(),
+    'source_blob_shas': Map.fromIterables(
+      sourcePaths,
+      (sourceHashes.stdout as String).trim().split('\n'),
+    ),
+    'project_version': RegExp(
+      r'^version:\s*(.+)$',
+      multiLine: true,
+    ).firstMatch(File('pubspec.yaml').readAsStringSync())!.group(1),
+    'generated_at_utc': DateTime.now().toUtc().toIso8601String(),
+    'dart_version': Platform.version,
     'gesture_real_seconds': 1,
     'step_seconds': 1 / 120,
     'method':

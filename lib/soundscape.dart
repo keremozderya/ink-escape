@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flame_audio/flame_audio.dart';
 
 /// All audio is bundled; no ads, trackers or remote audio requests.
@@ -11,6 +12,7 @@ class Soundscape {
       _playing = false,
       _disposed = false;
   bool _pencilPlaying = false;
+  bool get isPlaying => _playing;
   int _step = 0;
   DateTime _lastCrumb = DateTime.fromMillisecondsSinceEpoch(0);
   final Map<String, AudioPool> _pools = {};
@@ -145,6 +147,10 @@ class Soundscape {
     if (name == 'start') {
       resume();
     }
+    // Music lifecycle is independent of the SFX switch and audio loading.
+    if (name == 'death' || name == 'complete') {
+      pause();
+    }
     if (!_ready || !effectsOn) {
       return;
     }
@@ -170,12 +176,6 @@ class Soundscape {
               : .72,
         ),
       );
-    }
-    if (name == 'death' || name == 'complete') {
-      _playing = false;
-      if (_ready) {
-        _safe(_music!.pause());
-      }
     }
   }
 

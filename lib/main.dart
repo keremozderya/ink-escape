@@ -13,6 +13,7 @@ import 'soundscape.dart';
 import 'presentation/opening_story.dart';
 import 'presentation/journey_hud.dart';
 import 'presentation/centered_menu.dart';
+import 'presentation/drawing_tutorial.dart';
 
 const paper = Color(0xfff6f1e6),
     inkColor = Color(0xff38312a),
@@ -54,7 +55,15 @@ Future<void> main() async {
   );
   Map<String, dynamic>? saved;
   try {
-    saved = await journal.load();
+    saved = await journal.load(
+      accepts: (snapshot) {
+        InkSession.restore(data, snapshot);
+        return true;
+      },
+    );
+    if (saved == null && journal.hadUnreadableRecords) {
+      storageError = 'Kayıt kurtarılamadı; yeni yolculuk açıldı.';
+    }
   } catch (_) {
     storageError = 'Kayıt okunamadı; bu deneme geçici olacak.';
   }
@@ -68,9 +77,16 @@ Future<void> main() async {
     saved = null;
     storageError = 'Eski kayıt bu sürümle uyumsuz.';
   }
+  if (saved == null && (journal.hadUnreadableRecords || journal.epoch > 0)) {
+    session.resetEpoch = journal.epoch + 1;
+  }
   final sound = Soundscape();
-  sound.musicOn = await store.read('ink.settings.music') != 'off';
-  sound.effectsOn = await store.read('ink.settings.effects') != 'off';
+  try {
+    sound.musicOn = await store.read('ink.settings.music') != 'off';
+    sound.effectsOn = await store.read('ink.settings.effects') != 'off';
+  } catch (_) {
+    // Optional audio preferences must not prevent a recovered game opening.
+  }
   runApp(
     InkEscapeApp(
       session: session,
@@ -182,6 +198,24 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   int? _pointer, _pullPointer;
   bool _opening = false, _openingSeen = false;
   bool _mainMenu = false;
+  bool _teachingDraw = false;
+  bool get _drawingLessonActive =>
+      _teachingDraw &&
+      !s.drawingTutorialDone &&
+      s.ledge == null &&
+      !_opening &&
+      !_mainMenu;
+  V? get _lessonAnchor {
+    if (s.firstDrawDone || s.draft != null) return null;
+    for (final reference in s.level.reference) {
+      final points = reference['points'] as List<V>;
+      if (points.isNotEmpty && s.anchorAt(points.first) != null) {
+        return points.first;
+      }
+    }
+    return s.level.terrain.firstOrNull?.b;
+  }
+
   Timer? _saveIndicator;
   @override
   void initState() {
@@ -190,6 +224,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     game = InkGame(
       s,
       initialCamera: widget.camera,
+      holdForLesson: () => _drawingLessonActive,
       onFrame: () {
         if (mounted) {
           setState(() {
@@ -268,16 +303,12 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
 
   void _start() async {
     if (_mainMenu && s.phase == Phase.complete) {
-      s.levelIndex = 0;
-      s.entryInk = 180;
-      s.origin = 0;
-      s.entryWalked = 0;
-      _retry();
+      _retry(newJourney: true);
     }
     _mainMenu = false;
     if (!_openingSeen &&
-        !widget.restored &&
         !s.lab &&
+        !s.firstDrawDone &&
         s.x == 0 &&
         s.levelIndex == 0) {
       String? seen;
@@ -291,6 +322,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
         return;
       }
     }
+    _teachingDraw = !s.lab && s.levelIndex == 0 && !s.drawingTutorialDone;
     s.start();
     widget.sound.resume();
     setState(() => _settings = false);
@@ -305,11 +337,23 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     _start();
   }
 
-  void _retry() {
+  void _finishDrawingLesson() {
+    setState(() {
+      s.drawingTutorialDone = true;
+      _teachingDraw = false;
+    });
+    unawaited(_save());
+  }
+
+  void _retry({bool newJourney = false}) {
     _pointer = null;
     _pullPointer = null;
     game.cameraX = -96;
-    s.retry();
+    if (newJourney) {
+      s.restartJourney();
+    } else {
+      s.retry();
+    }
     game.resetView();
     setState(() => _settings = false);
   }
@@ -356,6 +400,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                           }
                           if (s.beginStroke(game.worldPoint(e.localPosition))) {
                             _pointer = e.pointer;
+                            if (_drawingLessonActive) setState(() {});
                           }
                         }
                       },
@@ -373,7 +418,10 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         }
                         if (e.pointer == _pointer) {
                           s.moveStroke(game.worldPoint(e.localPosition));
-                          s.endStroke();
+                          final committed = s.endStroke();
+                          if (committed && _drawingLessonActive) {
+                            unawaited(_save());
+                          }
                           _pointer = null;
                           setState(() {});
                         }
@@ -441,18 +489,38 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       child: IgnorePointer(child: _ledgeWarning(factor)),
                     ),
                   if (!_loading &&
-                      s.phase == Phase.playing &&
-                      s.ledge == null &&
-                      !s.firstDrawDone &&
-                      s.x > 60)
+                      !showMenu &&
+                      _drawingLessonActive &&
+                      s.phase == Phase.playing)
                     Positioned(
                       left: 24 * factor,
                       right: 24 * factor,
-                      bottom: 65 * factor,
-                      child: _instruction(
-                        'Sabit bir kâğıt kenarından başlayıp yolunu çiz.\nBitiş noktası serbest; Dot çıkamazsa takılır.',
-                        factor,
+                      top: 105 * factor,
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: 480 * factor),
+                          child: InkDrawingTutorial(
+                            step: s.firstDrawDone
+                                ? 2
+                                : s.draft != null
+                                ? 1
+                                : 0,
+                            ink: s.ink,
+                            scale: factor,
+                            onDone: _finishDrawingLesson,
+                          ),
+                        ),
                       ),
+                    ),
+                  if (!_loading &&
+                      !showMenu &&
+                      _drawingLessonActive &&
+                      s.phase == Phase.playing &&
+                      _lessonAnchor != null)
+                    Positioned(
+                      left: game.point(_lessonAnchor!).dx * game.scale - 17,
+                      top: game.point(_lessonAnchor!).dy * game.scale - 17,
+                      child: const InkTutorialAnchor(),
                     ),
                   if (s.phase == Phase.resumeStroke)
                     Positioned(
@@ -597,6 +665,12 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       : 'Dot tırmanıyor…',
                   style: TextStyle(fontSize: 14 * f, color: muted),
                 ),
+                if (!s.ledgeTutorialDone)
+                  Text(
+                    'Ekrana ${LedgeGrip.requiredPulls - pulls} kez basıp bırak. Basılı tutmak sayılmaz.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12 * f, color: muted),
+                  ),
                 SizedBox(height: 9 * f),
                 Row(
                   mainAxisSize: MainAxisSize.min,
@@ -943,12 +1017,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       ),
                     ] else if (complete) ...[
                       _button('Tekrar oyna', () {
-                        if (s.levelIndex > 0) {
-                          s.levelIndex = 0;
-                          s.entryInk = 180;
-                          s.origin = 0;
-                        }
-                        _retry();
+                        _retry(newJourney: true);
                       }, f),
                     ] else ...[
                       _button('Devam et', _start, f),

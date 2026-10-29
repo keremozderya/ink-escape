@@ -578,6 +578,7 @@ class InkSession {
   String message = '', lastEvent = '';
   double messageUntil = 0;
   bool firstDrawDone = false;
+  bool drawingTutorialDone = false, ledgeTutorialDone = false;
   bool migratedLayout = false;
   double get walkSpeed => lab ? 32 : 56;
   void Function(String, V)? onEvent;
@@ -758,6 +759,19 @@ class InkSession {
     }
   }
 
+  /// Start a fresh journey through the same path used by both replay menus.
+  /// Learned controls remain learned; chapter progress and run counters reset.
+  void restartJourney() {
+    levelIndex = 0;
+    entryInk = 180;
+    entryWalked = 0;
+    origin = 0;
+    activeTotal = 0;
+    strokeSerial = 0;
+    firstDrawDone = false;
+    retry();
+  }
+
   void retry() {
     final total = activeTotal, originalOrigin = origin;
     resetEpoch++;
@@ -769,6 +783,7 @@ class InkSession {
     vy = 0;
     gameTime = 0;
     realTime = 0;
+    saveElapsed = 0;
     grounded = true;
     onNatural = true;
     walked = entryWalked;
@@ -1166,7 +1181,9 @@ class InkSession {
       return false;
     }
     grip.pulls++;
+    if (grip.pulls == LedgeGrip.requiredPulls) ledgeTutorialDone = true;
     emit('ledgePull', grip.corner);
+    onSaveRequested?.call(true);
     return true;
   }
 
@@ -1517,6 +1534,7 @@ class InkSession {
       return;
     }
     final width = level.width;
+    resetEpoch++;
     x -= width;
     origin += width;
     levelIndex++;
@@ -1549,6 +1567,8 @@ class InkSession {
     checkpoint.origin = origin;
     checkpoint.resetEpoch = resetEpoch;
     checkpoint.firstDrawDone = firstDrawDone;
+    checkpoint.drawingTutorialDone = drawingTutorialDone;
+    checkpoint.ledgeTutorialDone = ledgeTutorialDone;
     return checkpoint.snapshot();
   }
 
@@ -1579,6 +1599,8 @@ class InkSession {
     'strokeSerial': strokeSerial,
     'resetEpoch': resetEpoch,
     'firstDrawDone': firstDrawDone,
+    'drawingTutorialDone': drawingTutorialDone,
+    'ledgeTutorialDone': ledgeTutorialDone,
     'lines': lines.map((l) => l.toJson()).toList(),
     'collected': collected.toList(),
     'balls': level.balls.map((b) => b.toJson()).toList(),
@@ -1625,6 +1647,9 @@ class InkSession {
       s.activeTotal = d('activeTotal');
       s.resetEpoch = (m['resetEpoch'] as num).toInt() + 1;
       s.firstDrawDone = m['firstDrawDone'] == true;
+      s.drawingTutorialDone =
+          m['drawingTutorialDone'] as bool? ?? s.firstDrawDone;
+      s.ledgeTutorialDone = m['ledgeTutorialDone'] == true;
       s.migratedLayout = true;
       return s;
     }
@@ -1653,6 +1678,9 @@ class InkSession {
     s.strokeSerial = (m['strokeSerial'] as num).toInt();
     s.resetEpoch = (m['resetEpoch'] as num).toInt();
     s.firstDrawDone = m['firstDrawDone'] == true;
+    s.drawingTutorialDone =
+        m['drawingTutorialDone'] as bool? ?? s.firstDrawDone;
+    s.ledgeTutorialDone = m['ledgeTutorialDone'] == true;
     s.lines.addAll(
       (m['lines'] as List).map(
         (a) => InkLine.from(Map<String, dynamic>.from(a)),

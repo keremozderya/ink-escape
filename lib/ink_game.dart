@@ -10,16 +10,24 @@ import 'presentation/ink_motion.dart';
 import 'presentation/paper_world.dart';
 
 class InkGame extends FlameGame {
-  InkGame(this.session, {this.onFrame, this.onEffect, this.initialCamera});
+  InkGame(
+    this.session, {
+    this.onFrame,
+    this.onEffect,
+    this.initialCamera,
+    this.holdForLesson,
+  });
   final InkSession session;
   final VoidCallback? onFrame;
   final void Function(String)? onEffect;
   final double? initialCamera;
+  final bool Function()? holdForLesson;
   late ui.Image dot, props, garden, openingArt;
   late PaperWorld paperWorld;
   bool sceneReady = false;
   bool _removed = false;
   double cameraX = -96, visualTime = 0, deadAge = 0, _uiTime = 0;
+  double _lessonSaveElapsed = 0;
   double _origin = 0;
   double _landAt = -10;
   double _lastWalked = 0, _gaitDistance = 0, _movement = 0, _groundAngle = 0;
@@ -195,7 +203,17 @@ class InkGame extends FlameGame {
     }
     final step = math.max(0.0, dt);
     if (session.phase == Phase.playing) {
-      session.advance(step);
+      if (holdForLesson?.call() ?? false) {
+        // The first lesson holds physics, not the five-second save guarantee.
+        _lessonSaveElapsed += step;
+        if (_lessonSaveElapsed >= 5) {
+          _lessonSaveElapsed = 0;
+          session.onSaveRequested?.call(false);
+        }
+      } else {
+        _lessonSaveElapsed = 0;
+        session.advance(step);
+      }
       final moved = math.max(0.0, session.walked - _lastWalked);
       _lastWalked = session.walked;
       final blend = 1 - math.exp(-14 * step);
