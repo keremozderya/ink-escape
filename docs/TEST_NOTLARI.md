@@ -1,5 +1,7 @@
 # Ink Escape 0.2 · Doğrulama
 
+**Tarihsel rapor — 18 Ekim 2026.** Aşağıdaki 21 test ve eski bölüm süreleri 0.2 sürümüne aittir. [29 Ekim güncel test kanıtı](TEST_2026-10-29.md) ve [güncel rota ölçümleri](route-verification-2026-10-29.json) ayrı tutulur.
+
 18 Ekim 2026. Flutter 3.47.5 / Dart 3.13.4.
 
 - **21/21 otomatik test geçti.** 16 çekirdek/kayıt testi, 2 gerçek girdi testi, 2 animasyon testi ve 1 arayüz akışı testi.

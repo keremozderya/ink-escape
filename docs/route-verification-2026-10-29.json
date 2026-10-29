@@ -1,0 +1,75 @@
+{
+  "source_commit": "647ec08526060fe75b47a0a551d7a3365430db52",
+  "source_blob_shas": {
+    "lib/core/ink_model.dart": "0c71de83453481d3d55af2f11a1b50b882afc153",
+    "assets/data/prototype_levels.json": "e77489c1765848863223366ce59e6f7bbf1b19ea",
+    "scripts/verify_routes.dart": "bdc680f1c79fa44710b1ee8b297450d76cfa8221"
+  },
+  "project_version": "0.3.0+3",
+  "generated_at_utc": "2026-10-29T16:33:15.659335Z",
+  "dart_version": "3.13.5 (stable) (Tue Sep 29 01:00:52 2026 -0700) on \"linux_x64\"",
+  "gesture_real_seconds": 1,
+  "step_seconds": 0.008333333333333333,
+  "method": "Authored reference points through public begin/move/end stroke API, while time advances; no injected solid lines.",
+  "results": [
+    {
+      "scenario": "story",
+      "passed": true,
+      "active_real_seconds": 307.633,
+      "level_boundaries_seconds": [
+        153.1
+      ],
+      "committed_human_api_gestures": 38,
+      "max_active_lines": 1,
+      "final_ink": 194.833,
+      "balls_captured": 0,
+      "gates_open": 0
+    },
+    {
+      "scenario": "zero-ink",
+      "passed": true,
+      "active_real_seconds": 307.633,
+      "level_boundaries_seconds": [
+        153.1
+      ],
+      "committed_human_api_gestures": 38,
+      "max_active_lines": 1,
+      "final_ink": 194.833,
+      "balls_captured": 0,
+      "gates_open": 0
+    },
+    {
+      "scenario": "two",
+      "passed": true,
+      "active_real_seconds": 28.083,
+      "level_boundaries_seconds": [],
+      "committed_human_api_gestures": 2,
+      "max_active_lines": 1,
+      "final_ink": 234.833,
+      "balls_captured": 0,
+      "gates_open": 0
+    },
+    {
+      "scenario": "roof",
+      "passed": true,
+      "active_real_seconds": 31.208,
+      "level_boundaries_seconds": [],
+      "committed_human_api_gestures": 2,
+      "max_active_lines": 2,
+      "final_ink": 240.0,
+      "balls_captured": 0,
+      "gates_open": 0
+    },
+    {
+      "scenario": "ball",
+      "passed": true,
+      "active_real_seconds": 31.208,
+      "level_boundaries_seconds": [],
+      "committed_human_api_gestures": 2,
+      "max_active_lines": 1,
+      "final_ink": 240.0,
+      "balls_captured": 1,
+      "gates_open": 1
+    }
+  ]
+}

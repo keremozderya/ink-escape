@@ -18,7 +18,9 @@ flutter test
 flutter analyze
 ```
 
-Doğrulama ortamı: Flutter 3.47.7, Dart 3.13.5. Android/iOS cihaz testi yapılmadı. APK bu pakette bulunmaz.
+Güncel doğrulama (29 Ekim 2026): Flutter 3.47.7 / Dart 3.13.5; **142/142 test**, temiz statik analiz ve 5/5 referans rota. [Test kanıtı ve kapsam](docs/TEST_2026-10-29.md). Android/iOS fiziksel cihaz testi ayrıca yapılmalı.
+
+İlk çizim için güvenli üç adımlı öğretici ve tutunmada bas–çek açıklaması var. Yeni yolculuk mesafeyi tamamen sıfırlar; efektler kapalıyken de ölüm/tamamlanma müziği durur. Kayıtlar çift yuva ve yeni üst bilgi checksum korumasıyla yüklenir.
 
 ## İçerik
 
