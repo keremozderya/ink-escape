@@ -1,0 +1,270 @@
+{
+  "implementation_commit": "b45b1e4cc0bdd384817efcd4c4acbb65f8df4060",
+  "project_version": "0.3.1+4",
+  "verified_files": [
+    {
+      "path": ".gitignore",
+      "size": 342,
+      "binary": false,
+      "sha": "795fe5829a7a3397aa32759522f699fea1619c95"
+    },
+    {
+      "path": "README.md",
+      "size": 3198,
+      "binary": false,
+      "sha": "7346850e4b875e09885d7ee55b0ef3339c87f171"
+    },
+    {
+      "path": "assets/audio/step0.wav",
+      "size": 18228,
+      "binary": true,
+      "sha": "3891ee7fddd937e4bb293772a0251ac3b1fde1d1"
+    },
+    {
+      "path": "assets/audio/step1.wav",
+      "size": 19724,
+      "binary": true,
+      "sha": "e2a22da1ab4c083b8f45ffe4ff56d491da015b57"
+    },
+    {
+      "path": "assets/audio/step2.wav",
+      "size": 18818,
+      "binary": true,
+      "sha": "fc4b997984cafb24e29bf6d2953ecee58d85f20f"
+    },
+    {
+      "path": "assets/audio/step3.wav",
+      "size": 19314,
+      "binary": true,
+      "sha": "6daab91c871a5f09307aa544c97385aca7415088"
+    },
+    {
+      "path": "assets/audio/step4.wav",
+      "size": 17510,
+      "binary": true,
+      "sha": "3e09844e1aeb2cafcd4e2f75e9a4693658366fc4"
+    },
+    {
+      "path": "assets/audio/step5.wav",
+      "size": 19304,
+      "binary": true,
+      "sha": "d2588f96c410717ab02cb84255433fd2890cefac"
+    },
+    {
+      "path": "assets/fonts/InkArabic-OFL.txt",
+      "size": 4382,
+      "binary": false,
+      "sha": "14c589f6384505ede3f8e52627d397513af3662d"
+    },
+    {
+      "path": "assets/fonts/InkArabic.ttf",
+      "size": 30364,
+      "binary": true,
+      "sha": "f0949ad3821cd20f7ca14a72523c11d758169536"
+    },
+    {
+      "path": "assets/fonts/InkJP-OFL.txt",
+      "size": 4388,
+      "binary": false,
+      "sha": "1c9f43281b8f216c5461fe9ac729afbade7724e4"
+    },
+    {
+      "path": "assets/fonts/InkJP.ttf",
+      "size": 220496,
+      "binary": true,
+      "sha": "8ce9abe0f51b9bd6b961d19ba55633cb5e756cf6"
+    },
+    {
+      "path": "assets/fonts/InkKR-OFL.txt",
+      "size": 4388,
+      "binary": false,
+      "sha": "1c9f43281b8f216c5461fe9ac729afbade7724e4"
+    },
+    {
+      "path": "assets/fonts/InkKR.ttf",
+      "size": 249952,
+      "binary": true,
+      "sha": "3b49175581b546802649f30c42bc0e7f14a3ccee"
+    },
+    {
+      "path": "assets/fonts/InkSC-OFL.txt",
+      "size": 4388,
+      "binary": false,
+      "sha": "1c9f43281b8f216c5461fe9ac729afbade7724e4"
+    },
+    {
+      "path": "assets/fonts/InkSC.ttf",
+      "size": 234444,
+      "binary": true,
+      "sha": "de2aa937191103dc07ea89d49c9940d0b3f2cefb"
+    },
+    {
+      "path": "docs/ink_footsteps_preview.wav",
+      "size": 352844,
+      "binary": true,
+      "sha": "37bd9f69cbf2da71f7fd1aaec4db827851c8dcd1"
+    },
+    {
+      "path": "docs/localization-font-sources.json",
+      "size": 2078,
+      "binary": false,
+      "sha": "be59cbe6217c5e79889ceb0a77aa1cafb3243b18"
+    },
+    {
+      "path": "lib/core/ink_model.dart",
+      "size": 56547,
+      "binary": false,
+      "sha": "ab954515dd5e9de1561bc294cb10e7b59f1d8471"
+    },
+    {
+      "path": "lib/ink_game.dart",
+      "size": 34054,
+      "binary": false,
+      "sha": "36bc88f99668d3c6e573543f61f8c5a777b9e5f4"
+    },
+    {
+      "path": "lib/l10n/catalog.dart",
+      "size": 56494,
+      "binary": false,
+      "sha": "0b47075686fcf752e1665cf42f04c7ab179413ca"
+    },
+    {
+      "path": "lib/l10n/ink_strings.dart",
+      "size": 2363,
+      "binary": false,
+      "sha": "04f884cb6e460dd65c6fc3c5f6c8aa6fc6501f4a"
+    },
+    {
+      "path": "lib/main.dart",
+      "size": 40648,
+      "binary": false,
+      "sha": "c2193dc0a5cc68a613452039e933b1b4734102e7"
+    },
+    {
+      "path": "lib/presentation/drawing_lens.dart",
+      "size": 3830,
+      "binary": false,
+      "sha": "8612fa21ba5001e4f2a574418b61a07657c8cdaa"
+    },
+    {
+      "path": "lib/presentation/drawing_tutorial.dart",
+      "size": 3430,
+      "binary": false,
+      "sha": "1c4014ab230be8ae429ca08894e07cfc2598cacb"
+    },
+    {
+      "path": "lib/presentation/ink_motion.dart",
+      "size": 8168,
+      "binary": false,
+      "sha": "2a737ef60225a6b9d52bbc9dba69ccac79fb6f9f"
+    },
+    {
+      "path": "lib/presentation/journey_hud.dart",
+      "size": 7898,
+      "binary": false,
+      "sha": "05596989b539cf00aca3c5e6de588a6fd3af43c3"
+    },
+    {
+      "path": "lib/presentation/opening_story.dart",
+      "size": 8606,
+      "binary": false,
+      "sha": "0cd6d6ded33e4992f90626d491bb7802db1da6a3"
+    },
+    {
+      "path": "lib/presentation/paper_world.dart",
+      "size": 8806,
+      "binary": false,
+      "sha": "8a91efba647a71a008778a7025365a3b4f95480c"
+    },
+    {
+      "path": "lib/soundscape.dart",
+      "size": 4270,
+      "binary": false,
+      "sha": "fe8221c3ffe151fd6fd6725b1c7ba1fadf7dd7a9"
+    },
+    {
+      "path": "pubspec.lock",
+      "size": 17989,
+      "binary": false,
+      "sha": "df38a0b5b184f55e8af728a21073bca0adda7c5a"
+    },
+    {
+      "path": "pubspec.yaml",
+      "size": 1155,
+      "binary": false,
+      "sha": "319df41e49306f329e444e783cda5a3d9478f78c"
+    },
+    {
+      "path": "scripts/make_ink_steps.py",
+      "size": 2679,
+      "binary": false,
+      "sha": "b1faee48139223383e5c4f58f410149e24f41e8a"
+    },
+    {
+      "path": "scripts/subset_localization_fonts.py",
+      "size": 2034,
+      "binary": false,
+      "sha": "90e187e929637481ba42bd29e7f1dad52a751637"
+    },
+    {
+      "path": "test/animation_transition_test.dart",
+      "size": 1892,
+      "binary": false,
+      "sha": "123126339ff44b21f3bfcb47a4e0365c63b5a0b6"
+    },
+    {
+      "path": "test/drawing_input_test.dart",
+      "size": 4729,
+      "binary": false,
+      "sha": "609c94797f80b36ab1aec59b4ac2271cf2d94d3e"
+    },
+    {
+      "path": "test/journey_hud_test.dart",
+      "size": 6591,
+      "binary": false,
+      "sha": "7b83bd3895bd1539710900cf18af77b2ed14da06"
+    },
+    {
+      "path": "test/ledge_input_test.dart",
+      "size": 3528,
+      "binary": false,
+      "sha": "67f10727113d3556e55d7be3053785c10a8e1e13"
+    },
+    {
+      "path": "test/localization_test.dart",
+      "size": 6626,
+      "binary": false,
+      "sha": "cbcd94c15db099892283433d004a560476dc3612"
+    },
+    {
+      "path": "test/raised_bridge_test.dart",
+      "size": 2845,
+      "binary": false,
+      "sha": "cd5d8c0261b5239a3b5cab90e790aea520b10366"
+    },
+    {
+      "path": "test/session_flow_test.dart",
+      "size": 9991,
+      "binary": false,
+      "sha": "004161065fd89f458d85b77486b4ec7230d21669"
+    },
+    {
+      "path": "test/stuck_countdown_test.dart",
+      "size": 4065,
+      "binary": false,
+      "sha": "f2432f80e1abf0d0b0ce33c89c02c3c0a2daf7df"
+    },
+    {
+      "path": "test/ui_test.dart",
+      "size": 6135,
+      "binary": false,
+      "sha": "88a697efbeb5fabda9d7d4670644c68b8de01f3c"
+    },
+    {
+      "path": "test/viewport_menu_test.dart",
+      "size": 4812,
+      "binary": false,
+      "sha": "c398cb724add149436b9a6d83ab8f6487627ecb2"
+    }
+  ]
+}
