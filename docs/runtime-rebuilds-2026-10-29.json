@@ -1,0 +1,21 @@
+{
+  "baseline_main_commit": "3bb08a5c6e6035a4dd25a0975291b5d57ef6c597",
+  "implementation_commit": "e10c59ac356de902e4bf6648f51e473f6f7ef3fb",
+  "before": {
+    "simulated_frames": 120,
+    "simulated_fps": 60,
+    "game_screen_rebuilds": 41,
+    "journey_hud_rebuilds": 41,
+    "autosave_written": true,
+    "method": "Flutter widget build hook; not native device frame timing"
+  },
+  "after": {
+    "simulated_frames": 120,
+    "simulated_fps": 60,
+    "game_screen_rebuilds": 0,
+    "journey_hud_rebuilds": 41,
+    "autosave_written": true,
+    "method": "Flutter widget build hook; not native device frame timing"
+  },
+  "scope": "Identical obstacle-free Flutter widget fixture with one autosave. Not Android frame timing or a measured FPS gain."
+}

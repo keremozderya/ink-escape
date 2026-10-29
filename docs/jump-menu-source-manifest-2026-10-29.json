@@ -1,0 +1,22 @@
+{
+  "implementation_commit": "e10c59ac356de902e4bf6648f51e473f6f7ef3fb",
+  "base_commit": "3bb08a5c6e6035a4dd25a0975291b5d57ef6c597",
+  "version": "0.3.2+5",
+  "flutter": "3.47.2",
+  "dart": "3.13.2",
+  "test_count": 209,
+  "test_files": 25,
+  "source_blob_shas": {
+    "README.md": "dfedc8c75883c1e52fc78bade0fb7573b3d0da21",
+    "lib/core/ink_model.dart": "8695c4c184ad999407368ea3847b0b95e3452f17",
+    "lib/core/save_journal.dart": "60c3bebbf067d408d059d2a155c106ff8e1b9bd2",
+    "lib/main.dart": "2f5bac623878f188751c5a77b21af30016db7a84",
+    "pubspec.yaml": "3abeb45179c3e1cb851f2a7d0e0663972c14ef3b",
+    "test/climbing_render_test.dart": "4258c16813878277df6fbdd299419cf2194989b5",
+    "test/core_test.dart": "2afe3a8f23d333b5b1b94897715fcf00b0db9611",
+    "test/ground_contact_test.dart": "56074062bb10d5958e7908dee10dfa8a365e8c30",
+    "test/viewport_menu_test.dart": "9841234c738d463a755854f8fe58ddb6adb5b3ba",
+    "test/auto_jump_test.dart": "10f7bc164aeeb937c1c763d206b4505c6748990e",
+    "test/runtime_load_test.dart": "9abae7e00716c832273d84a9037be5afc13811b9"
+  }
+}
