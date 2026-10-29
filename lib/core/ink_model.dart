@@ -334,6 +334,15 @@ class _GroundSegment {
   bool contains(double xx) => xx >= a.x - 1e-6 && xx <= b.x + 1e-6;
 }
 
+/// Exposed left side of solid paper. Ink is a contour, not a filled block.
+class _PaperWall {
+  _PaperWall(this.floor, this.bottom);
+  final _GroundSegment floor;
+  final double bottom;
+  double get x => floor.a.x;
+  double get top => floor.a.y;
+}
+
 /// One continuous uphill section. Its total rise, rather than each tiny
 /// sampled segment, determines whether it is a small step or a tall wall.
 class _ClimbRun {
@@ -558,6 +567,8 @@ class InkSession {
   double get distanceCm => walked / unitsPerCentimeter;
   double get levelProgress => (x / level.width).clamp(0.0, 1.0).toDouble();
   static const maxClimbDegrees = 55.0, stuckLimit = 3.0, dotHeight = 32.0;
+  static const autoJumpHeight = dotHeight * .75;
+  static const _gravity = 160.0, _bodyHalfWidth = 12.0;
   static final maxClimbSlope = math.tan(maxClimbDegrees * math.pi / 180);
   double _stuckElapsed = 0;
   V? _progressPoint;
@@ -570,6 +581,7 @@ class InkSession {
   List<bool> _retiredStates = [];
   List<_GroundSegment> _segments = [], _nearSegments = [];
   List<_ClimbRun> _climbs = [];
+  List<_PaperWall> _paperWalls = [];
   double _nearLeft = double.infinity, _nearRight = double.negativeInfinity;
   final Set<String> collected = {};
   final List<Crumb> crumbs = [];
@@ -893,6 +905,7 @@ class InkSession {
     _retiredStates = lines.map((line) => line.retired).toList();
     _segments = _buildGroundSegments()..sort((a, b) => a.a.x.compareTo(b.a.x));
     _climbs = _buildClimbRuns().toList();
+    _paperWalls = _buildPaperWalls();
     _nearLeft = double.infinity;
     _nearRight = double.negativeInfinity;
   }
@@ -935,6 +948,22 @@ class InkSession {
       }
     }
     return segments;
+  }
+
+  List<_PaperWall> _buildPaperWalls() {
+    final paper = _segments.where((floor) => floor.natural).toList();
+    return [
+      for (final floor in paper)
+        if (!paper.any(
+          (other) =>
+              !identical(other, floor) &&
+              other.contains(floor.a.x - .001) &&
+              (other.yAt(floor.a.x) - floor.a.y).abs() <= .75,
+        ))
+          // Elevated anchor pads are thin shelves; ordinary paper is filled
+          // down to the fall boundary, matching the visible torn bank.
+          _PaperWall(floor, floor.a.y > 64 ? floor.a.y - 8 : -300),
+    ];
   }
 
   _GroundSegment? _support(
@@ -1068,15 +1097,21 @@ class InkSession {
       grounded && remaining > 1e-9 && i < segments.length * 2 + 2;
       i++
     ) {
+      if (_tryAutoJump(walkSpeed * remaining, climbs)) break;
       if (_climbSmallStep(walkSpeed * remaining, climbs)) return;
       final floor = _support(segments, V(x, y));
       if (floor != null) {
         if (floor.slope > maxClimbSlope + 1e-6) return;
         final end = _junctionX(segments, floor, x, 1);
-        final dx = math.min(
+        var dx = math.min(
           walkSpeed * remaining / floor.lengthPerX,
           math.max(0.0, end - x),
         );
+        final sideLimit = _paperSideLimit(x + dx, y);
+        if (sideLimit < x + dx - 1e-7) {
+          dx = math.max(0.0, sideLimit - x);
+          if (dx <= 1e-7) return;
+        }
         if (_blockedAhead(x + dx, y, climbs)) return;
         if (dx > 1e-7) {
           final target = V(x + dx, floor.yAt(x + dx));
@@ -1093,12 +1128,28 @@ class InkSession {
     }
     if (grounded || remaining <= 1e-9) return;
     final previous = V(x, y);
-    final nextX = x + walkSpeed * remaining;
-    vy -= 160 * remaining;
-    final next = V(
+    final nextX = _paperSideLimit(x + walkSpeed * remaining, y);
+    vy -= _gravity * remaining;
+    var next = V(
       _blockedAhead(nextX, y, climbs) ? x : nextX,
       y + vy * remaining,
     );
+    if (vy > 0) {
+      // Stop the head at a roof instead of jumping through its underside.
+      var ceilingHit = double.infinity;
+      for (final floor in segments) {
+        final before = previous.y + dotHeight - floor.yAt(previous.x);
+        final after = next.y + dotHeight - floor.yAt(next.x);
+        if (before >= -1e-7 || after < 0) continue;
+        final t = before / (before - after);
+        final xx = previous.x + (next.x - previous.x) * t;
+        if (floor.contains(xx) && t < ceilingHit) ceilingHit = t;
+      }
+      if (ceilingHit.isFinite) {
+        next = previous + (next - previous) * ceilingHit;
+        vy = 0;
+      }
+    }
     _GroundSegment? landing;
     var firstHit = double.infinity;
     for (final floor in segments) {
@@ -1131,7 +1182,7 @@ class InkSession {
       y = next.y;
       // A line can be finished just after Dot passes its first point. Recover
       // only while his feet are still within one short step of the paper lip.
-      if (vy > -30 && _stepOntoRaisedInk(segments)) return;
+      if (vy <= 0 && vy > -30 && _stepOntoRaisedInk(segments)) return;
       _tryGrip(previous, next, segments);
     }
   }
@@ -1362,8 +1413,45 @@ class InkSession {
   }
 
   bool _smallEnough(_ClimbRun run, double feetY) =>
-      run.rise <= dotHeight + 1e-6 &&
-      run.points.last.y - feetY <= dotHeight + 1e-6;
+      run.rise <= autoJumpHeight + 1e-6 &&
+      run.points.last.y - feetY <= autoJumpHeight + 1e-6;
+
+  /// Launch from real support before the body reaches a short obstacle.
+  /// Velocity and grounded state already persist, so a saved hop resumes
+  /// with the same arc without introducing another save-state machine.
+  bool _tryAutoJump(double travel, List<_ClimbRun> climbs) {
+    if (_support(_nearGround, V(x, y)) == null) return false;
+    var rise = double.infinity, nearest = double.infinity;
+    void consider(double edgeX, double top) {
+      final ahead = edgeX - x, height = top - y;
+      if (ahead < -.001 ||
+          ahead > _bodyHalfWidth + travel ||
+          height <= .75 ||
+          height > autoJumpHeight + 1e-6 ||
+          ahead >= nearest) {
+        return;
+      }
+      nearest = ahead;
+      rise = height;
+    }
+
+    for (final wall in _paperWalls) {
+      if (wall.floor.slope <= maxClimbSlope) consider(wall.x, wall.top);
+    }
+    for (final run in climbs) {
+      if (_smallEnough(run, y) && (run.points.first.y - y).abs() <= .75) {
+        consider(run.points.first.x, run.points.last.y);
+      }
+    }
+    if (!rise.isFinite) return false;
+    // Four units above the obstacle leave room for discrete integration.
+    vy = math.sqrt(2 * _gravity * (rise + 4));
+    grounded = false;
+    onNatural = false;
+    cornerSupport = null;
+    emit('jump');
+    return true;
+  }
 
   bool _climbSmallStep(double travel, List<_ClimbRun> climbs) {
     for (final run in climbs) {
@@ -1379,6 +1467,9 @@ class InkSession {
         distance = run.distanceAt(V(x, y));
       }
       if (distance == null || distance >= run.path.cost - 1e-6) continue;
+      // Compatibility for a save made on the old climbing contour. New
+      // approaches use a hop rather than walking vertically up the wall.
+      if (distance <= 1e-6) continue;
       final nextDistance = math.min(run.path.cost, distance + available);
       var target = run.path.atDistance(nextDistance).$1;
       if (nextDistance >= run.path.cost - 1e-6) {
@@ -1392,11 +1483,27 @@ class InkSession {
     return false;
   }
 
+  double _paperSideLimit(double nextX, double feetY) {
+    var limit = nextX;
+    for (final wall in _paperWalls) {
+      if (wall.x > nextX + _bodyHalfWidth) break;
+      if (wall.x < x - _bodyHalfWidth ||
+          wall.top <= feetY + .5 ||
+          wall.bottom >= feetY + dotHeight) {
+        continue;
+      }
+      limit = math.min(limit, math.max(x, wall.x - _bodyHalfWidth));
+    }
+    return limit;
+  }
+
   bool _blockedAhead(double nextX, double feetY, List<_ClimbRun> climbs) {
     // Sweep Dot's body against walls and slopes he cannot climb. Overhead
     // roofs stay clear, and vertical strokes never become infinite slopes.
     for (final run in climbs) {
-      if (_smallEnough(run, feetY)) continue;
+      // A connected short descent can lead into a small uphill run. Let the
+      // grounded foot reach its base; an airborne body must clear its top.
+      if (grounded && _smallEnough(run, feetY)) continue;
       for (var i = 1; i < run.points.length; i++) {
         final a = run.points[i - 1], b = run.points[i];
         final dx = b.x - a.x;

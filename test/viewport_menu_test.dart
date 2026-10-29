@@ -111,7 +111,28 @@ void main() {
             expect(content.center.dy, closeTo(viewport.center.dy, 1));
           }
           expect(find.byKey(const ValueKey('ink-journey-hud')), findsNothing);
+          final buttons = find.byType(FilledButton);
+          expect(buttons, findsWidgets);
+          for (final element in buttons.evaluate()) {
+            final button = element.widget as FilledButton;
+            final background = button.style!.backgroundColor!.resolve({})!;
+            final foreground = button.style!.foregroundColor!.resolve({})!;
+            final light = background.computeLuminance();
+            final dark = foreground.computeLuminance();
+            final contrast = light > dark
+                ? (light + .05) / (dark + .05)
+                : (dark + .05) / (light + .05);
+            expect(background.a, 1);
+            expect(contrast, greaterThan(7));
+            expect(
+              tester.getSize(find.byWidget(button)).height,
+              greaterThanOrEqualTo(48),
+            );
+          }
           expect(tester.takeException(), isNull);
+          if (phase == Phase.ready) {
+            await capture(tester, key, 'paper-menu-${size.width.toInt()}');
+          }
           if (size.width == 1095 && phase == Phase.dead) {
             await capture(tester, key, 'centered-death-menu');
           }

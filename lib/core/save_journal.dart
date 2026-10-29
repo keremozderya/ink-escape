@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 
 abstract class StringStore {
   Future<String?> read(String key);
@@ -6,9 +7,10 @@ abstract class StringStore {
 }
 
 class SaveJournal {
-  SaveJournal(this.store, this.namespace);
+  SaveJournal(this.store, this.namespace, {this.backgroundEncoding = false});
   final StringStore store;
   final String namespace;
+  final bool backgroundEncoding;
   int epoch = 0, revision = 0;
   bool hadUnreadableRecords = false;
   Future<void> _tail = Future<void>.value();
@@ -25,6 +27,45 @@ class SaveJournal {
   static int _recordChecksum(String payload, int epoch, int revision) =>
       checksum('$epoch:$revision:$payload');
 
+  static String _encodeRecord(
+    Map<String, dynamic> snapshot,
+    int epoch,
+    int revision,
+    bool fence,
+  ) {
+    final payload = jsonEncode(snapshot);
+    return jsonEncode({
+      'format': 2,
+      if (!fence) 'revision': revision,
+      'epoch': epoch,
+      'checksum': _recordChecksum(payload, epoch, revision),
+      'payload': payload,
+    });
+  }
+
+  static dynamic _capture(dynamic value) {
+    if (value is List) return value.map(_capture).toList();
+    if (value is Map<String, dynamic>) {
+      return value.map((key, item) => MapEntry(key, _capture(item)));
+    }
+    return value;
+  }
+
+  Future<String> _encode(
+    Map<String, dynamic> snapshot,
+    int epoch,
+    int revision, {
+    bool fence = false,
+  }) {
+    if (!backgroundEncoding) {
+      return Future.value(_encodeRecord(snapshot, epoch, revision, fence));
+    }
+    // Capture nested collections now; the live world may change while a
+    // worker encodes or a previous disk write is still pending.
+    final captured = _capture(snapshot) as Map<String, dynamic>;
+    return Isolate.run(() => _encodeRecord(captured, epoch, revision, fence));
+  }
+
   Future<void> save(Map<String, dynamic> snapshot, {required int resetEpoch}) {
     if (resetEpoch < 0) {
       throw RangeError.value(resetEpoch, 'resetEpoch');
@@ -32,19 +73,16 @@ class SaveJournal {
     if (resetEpoch < epoch) {
       return Future<void>.value();
     }
-    final payload = jsonEncode(snapshot), rev = ++revision;
+    final rev = ++revision;
     if (resetEpoch > epoch) {
       epoch = resetEpoch;
     }
     final capturedEpoch = resetEpoch;
-    final encoded = jsonEncode({
-      'format': 2,
-      'revision': rev,
-      'epoch': capturedEpoch,
-      'checksum': _recordChecksum(payload, capturedEpoch, rev),
-      'payload': payload,
-    });
-    _tail = _tail.catchError((Object _) {}).then((_) async {
+    final previous = _tail.catchError((Object _) {});
+    // Attach to the worker immediately, even while a previous write waits,
+    // so encoding failures cannot become unhandled asynchronous errors.
+    _tail = _encode(snapshot, capturedEpoch, rev).then((encoded) async {
+      await previous;
       if (capturedEpoch < epoch) {
         return;
       }
@@ -60,20 +98,18 @@ class SaveJournal {
       return Future<void>.value();
     }
     epoch = resetEpoch;
-    final payload = jsonEncode(checkpoint);
-    final encoded = jsonEncode({
-      'format': 2,
-      'epoch': resetEpoch,
-      'checksum': _recordChecksum(payload, resetEpoch, 0),
-      'payload': payload,
-    });
-    _fenceTail = _fenceTail.catchError((Object _) {}).then((_) async {
+    final previous = _fenceTail.catchError((Object _) {});
+    final captured = _capture(checkpoint) as Map<String, dynamic>;
+    _fenceTail = _encode(captured, resetEpoch, 0, fence: true).then((
+      encoded,
+    ) async {
+      await previous;
       if (resetEpoch < epoch) {
         return;
       }
       await store.write('$namespace.fence', encoded);
     });
-    return _fenceTail.then((_) => save(checkpoint, resetEpoch: resetEpoch));
+    return _fenceTail.then((_) => save(captured, resetEpoch: resetEpoch));
   }
 
   _JournalRecord? _decode(String? value, {bool fence = false}) {

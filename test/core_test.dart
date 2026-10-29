@@ -213,8 +213,8 @@ void main() {
     s.advance(.12);
     expect(s.phase, Phase.dead);
   });
-  test('Steep bumps and vertical steps up to Dot height remain climbable', () {
-    for (final height in [12.0, 24.0, InkSession.dotHeight]) {
+  test('Steep bumps and vertical steps up to three-quarter height are jumped', () {
+    for (final height in [12.0, InkSession.autoJumpHeight]) {
       final s = game();
       expect(draw(s, [
         const V(100, 0), V(100, height), V(145, height), const V(170, 0),

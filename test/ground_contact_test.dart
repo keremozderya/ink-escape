@@ -20,23 +20,29 @@ InkSession scene(List<V> points, {bool ink = false, bool reverse = false}) {
 
 void main() {
   for (final ink in [false, true]) {
-    test('A sharp shallow ditch keeps contact on ${ink ? 'ink' : 'paper'}', () {
-      final s = scene([
-        const V(0, 0),
-        const V(40, 0),
-        const V(44, -24),
-        const V(48, 0),
-        const V(200, 0),
-      ], ink: ink)..x = 38;
-      for (var i = 0; i < 180; i++) {
-        s.advance(1 / 120);
-        expect(s.grounded, isTrue, reason: 'Contact lost at (${s.x}, ${s.y})');
-        expect(s.phase, Phase.playing);
-        expect(s.y, greaterThanOrEqualTo(-24.001));
-      }
-      expect(s.x, greaterThan(65));
-      expect(s.y, closeTo(0, 1e-5));
-    });
+    test(
+      'A sharp shallow ditch is crossed with a hop on ${ink ? 'ink' : 'paper'}',
+      () {
+        final s = scene([
+          const V(0, 0),
+          const V(40, 0),
+          const V(44, -24),
+          const V(48, 0),
+          const V(200, 0),
+        ], ink: ink)..x = 38;
+        var jumped = false;
+        for (var i = 0; i < 180; i++) {
+          s.advance(1 / 120);
+          jumped |= !s.grounded && s.vy > 0;
+          expect(s.phase, Phase.playing);
+          expect(s.y, greaterThanOrEqualTo(-24.001));
+        }
+        expect(s.x, greaterThan(65));
+        expect(s.y, closeTo(0, 1e-5));
+        expect(s.grounded, isTrue);
+        expect(jumped, isTrue);
+      },
+    );
 
     test(
       'A falling foot catches a rising ${ink ? 'ink' : 'paper'} surface',
@@ -102,7 +108,8 @@ void main() {
     expect(a.x, closeTo(b.x, 1e-6));
     expect(a.y, closeTo(b.y, 1e-6));
     expect(a.walked, closeTo(b.walked, 1e-6));
-    expect(a.walked, closeTo(a.walkSpeed * 1.5, .5));
+    // As with falling, airborne travel does not count as planted footsteps.
+    expect(a.walked, inExclusiveRange(30, a.walkSpeed * 1.5));
   });
 
   test(

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flame/game.dart';
@@ -56,6 +57,7 @@ Future<void> main() async {
   final journal = SaveJournal(
     store,
     'ink-escape-native-v1-${lab == null ? 'story' : test}',
+    backgroundEncoding: true,
   );
   Map<String, dynamic>? saved;
   try {
@@ -260,6 +262,9 @@ class GameScreen extends StatefulWidget {
 
 class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   late final InkGame game;
+  late final Widget _gameView;
+  final _hudTick = ValueNotifier<int>(0);
+  Object? _lastOverlayState;
   InkSession get s => widget.session;
   InkStrings get strings => InkStrings.of(context);
   String _t(String source, [Map<String, Object> args = const {}]) =>
@@ -302,19 +307,47 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       s,
       initialCamera: widget.camera,
       holdForLesson: () => _drawingLessonActive,
-      onFrame: () {
-        if (mounted) {
-          setState(() {
-            _loading = !game.sceneReady;
-          });
-        }
-      },
+      onFrame: _onGameFrame,
       onEffect: widget.sound.event,
+    );
+    // Keep Flame's widget identity stable when HUD values or the drawing
+    // lens change; its render loop already paints independently.
+    _gameView = GameWidget(
+      game: game,
+      loadingBuilder: (context) => ColoredBox(
+        color: paper,
+        child: Center(
+          child: Text(InkStrings.of(context).t('Kâğıtlar hazırlanıyor…')),
+        ),
+      ),
     );
     s.onSaveRequested = (forced) {
       unawaited(_save());
     };
     unawaited(widget.sound.init());
+  }
+
+  void _onGameFrame() {
+    if (!mounted) return;
+    final overlayState = (
+      game.sceneReady,
+      s.phase,
+      s.levelIndex,
+      s.stuckCountdown,
+      s.ledge?.pulls,
+      s.firstDrawDone,
+      s.drawingTutorialDone,
+      s.ledgeTutorialDone,
+      s.x > 60,
+      s.realTime < s.messageUntil,
+      s.message,
+      game.deathEffectComplete,
+    );
+    if (overlayState != _lastOverlayState) {
+      _lastOverlayState = overlayState;
+      setState(() => _loading = !game.sceneReady);
+    }
+    _hudTick.value++;
   }
 
   Future<void> _save() async {
@@ -330,14 +363,14 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _saved = true;
-        _saveError = false;
-      });
+      _saved = true;
+      if (_saveError) setState(() => _saveError = false);
+      _hudTick.value++;
       _saveIndicator?.cancel();
       _saveIndicator = Timer(const Duration(milliseconds: 850), () {
         if (mounted) {
-          setState(() => _saved = false);
+          _saved = false;
+          _hudTick.value++;
         }
       });
     } catch (_) {
@@ -443,6 +476,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _saveIndicator?.cancel();
     s.onSaveRequested = null;
+    _hudTick.dispose();
     game.pauseEngine();
     unawaited(widget.sound.dispose());
     super.dispose();
@@ -528,15 +562,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                           setState(() {});
                         }
                       },
-                      child: GameWidget(
-                        game: game,
-                        loadingBuilder: (_) => ColoredBox(
-                          color: paper,
-                          child: Center(
-                            child: Text(_t('Kâğıtlar hazırlanıyor…')),
-                          ),
-                        ),
-                      ),
+                      child: _gameView,
                     ),
                   ),
                   Positioned.fill(
@@ -556,10 +582,15 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       left: 30 * factor,
                       right: 26 * factor,
                       top: 30 * factor,
-                      child: _hud(
-                        (constraints.maxWidth / 600)
-                            .clamp(.5, factor)
-                            .toDouble(),
+                      child: RepaintBoundary(
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: _hudTick,
+                          builder: (context, tick, child) => _hud(
+                            (constraints.maxWidth / 600)
+                                .clamp(.5, factor)
+                                .toDouble(),
+                          ),
+                        ),
                       ),
                     ),
                   if (!_loading && !_mainMenu && s.stuckCountdown != null)
@@ -919,30 +950,33 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   }) => Padding(
     padding: EdgeInsets.symmetric(vertical: 6 * f),
     child: SizedBox(
-      width: 250 * f,
-      height: 51 * f,
-      child: primary
-          ? FilledButton(
-              onPressed: onTap,
-              style: FilledButton.styleFrom(
-                backgroundColor: inkColor,
-                foregroundColor: paper,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(11 * f),
-                ),
-              ),
-              child: Text(
-                _t(text),
-                style: TextStyle(fontSize: 15 * f, fontWeight: FontWeight.w700),
-              ),
-            )
-          : TextButton(
-              onPressed: onTap,
-              child: Text(
-                _t(text),
-                style: TextStyle(fontSize: 13 * f, color: muted),
-              ),
-            ),
+      width: math.max(220, 250 * f),
+      height: math.max(48, 51 * f),
+      child: FilledButton(
+        key: ValueKey('ink-menu-button-$text'),
+        onPressed: onTap,
+        style: FilledButton.styleFrom(
+          backgroundColor: primary ? inkColor : const Color(0xfffff6e5),
+          foregroundColor: primary ? paper : inkColor,
+          elevation: primary ? 3 : 1,
+          shadowColor: const Color(0x553d3226),
+          side: BorderSide(
+            color: primary ? inkColor : const Color(0xffa28a66),
+            width: 1.2,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(11 * f),
+          ),
+        ),
+        child: Text(
+          _t(text),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: (primary ? 15 : 14) * math.max(.85, f),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
     ),
   );
   Widget _overlay(double f) {
