@@ -30,6 +30,12 @@ Eski sürümün kayıtlarında tamamlanan bölümler korunur; değişen parkur n
 
 Kaynaklar lib/; görseller, sesler, fontlar ve bölüm verileri assets/; platform projeleri android/ ve ios/; otomatik kontroller test/ altındadır. Font lisansları assets/fonts/ içindedir.
 
+## Uygulama ikonu
+
+Ana ekrandaki ikon, kullanıcının seçtiği kâğıttan çıkan Dot görselidir. Kaynak `assets/icon/app_icon.png` (1024×1024, RGB); Android'in beş yoğunluğu, Android 8+ adaptive ikon katmanları, iPhone/iPad/App Store ikonları ve Windows ikonu bu kaynaktan üretilir. Android'de görsel 108 dp katmanın ortasındaki 66 dp alana yerleştirilir; maske sistem tarafından uygulanır.
+
+İkonlar depoda hazırdır; normal `flutter run` veya yeni APK/IPA derlemesiyle kullanılır. Görsel değişirse Python ve Pillow ile `python scripts/generate_app_icons.py` çalıştırılır; Flutter'a ek paket gerekmez. Native cihazda ana ekran görünümü ayrıca kontrol edilmelidir.
+
 ## Çizim, animasyon ve dil güncellemesi
 
 Dokunmatik çizimde parmağın üstünde 1,75× büyüteç, hedef işareti ve canlı mürekkep maliyeti gösterilir. Çizim gerçek dokunma konumunu kullanır. Doğal kâğıdın açık kenarında 12 birime kadar yükseltilmiş mürekkep çizgisine basılabilir; baş üstündeki çizgiler zemine dönüştürülmez. Yürüme, düşme ve tutunma geçişleri yumuşatılmış, gövde esnemesi azaltılmıştır. Altı kısa ıslak mürekkep adım sesi eklenmiştir.
