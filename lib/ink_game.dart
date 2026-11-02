@@ -7,8 +7,12 @@ import 'package:flutter/material.dart';
 import 'core/ink_model.dart';
 import 'presentation/ink_death.dart';
 import 'presentation/ink_motion.dart';
+import 'presentation/ink_surf.dart';
 import 'presentation/paper_world.dart';
 import 'l10n/ink_strings.dart';
+
+part 'presentation/mechanics_lab_painter.dart';
+part 'presentation/ink_surf_painter.dart';
 
 class InkGame extends FlameGame {
   InkGame(
@@ -32,6 +36,8 @@ class InkGame extends FlameGame {
   double _lessonSaveElapsed = 0;
   double _origin = 0;
   double _landAt = -10;
+  double _labVertical = 0;
+  final surf = InkSurfAnimation();
   double _lastWalked = 0, _gaitDistance = 0, _movement = 0, _groundAngle = 0;
   final _animation = InkAnimationBlend();
   V? _lastCorner;
@@ -53,7 +59,14 @@ class InkGame extends FlameGame {
   double get scale => math.min(size.y / worldHeight, size.x / worldWidth);
   double get visibleWidth => size.x / scale;
   double get visibleHeight => size.y / scale;
-  double get groundY => visibleHeight - groundInset;
+  double get groundY => visibleHeight - groundInset + _labVertical;
+  double get _labVerticalTarget => session.mechanics?.spec.momentum == true
+      ? -110
+      : session.mechanics?.paper != null
+      ? -110
+      : session.mechanics?.spec.id == 'crumble'
+      ? -85
+      : 0;
   bool get deathEffectComplete => deadAge >= InkDeathPose.duration;
   V worldPoint(Offset local) =>
       V(local.dx / scale + cameraX, groundY - local.dy / scale);
@@ -90,6 +103,8 @@ class InkGame extends FlameGame {
         ? session.x - 96
         : initialCamera ?? session.x - 96;
     _origin = session.origin;
+    _labVertical = _labVerticalTarget;
+    surf.reset();
     _cacheNext();
     if (session.level.gates.any((g) => g.open)) {
       _gateAt = -1;
@@ -111,6 +126,8 @@ class InkGame extends FlameGame {
     deadAge = 0;
     _resetGait();
     _landAt = -10;
+    _labVertical = _labVerticalTarget;
+    surf.reset();
     particles.clear();
     _cacheNext();
   }
@@ -164,6 +181,19 @@ class InkGame extends FlameGame {
   void effect(String name, V at) {
     onEffect?.call(name);
     if (name == 'land') _landAt = visualTime;
+    if (name == 'slideStart') surf.begin(session.gameTime);
+    if (name == 'slideDust') {
+      surf.friction(at, session.mechanics!.railAngle, session.gameTime);
+    }
+    if (name == 'surfRelease' && session.mechanics?.lastSlideExit != null) {
+      surf.release(session.mechanics!.lastSlideExit!);
+    }
+    if (name == 'erase') {
+      particles.add(
+        InkParticle(at + const V(-4, -7), const V(-6, 7), .65, false),
+      );
+      particles.add(InkParticle(at + const V(3, -8), const V(5, 5), .7, false));
+    }
     if (name == 'ledgeGrab') {
       _catchOffset = _frameStart + _catchOffset - V(session.x, session.y);
     }
@@ -171,6 +201,7 @@ class InkGame extends FlameGame {
       deadAge = 0;
       particles.clear();
       _flights.clear();
+      surf.reset();
     }
     if (name == 'commit' && session.lines.isNotEmpty) {
       _lineBorn[session.lines.last.id] = visualTime;
@@ -250,7 +281,14 @@ class InkGame extends FlameGame {
       );
       _catchOffset = _catchOffset * math.exp(-20 * step);
       visualTime += step;
-      cameraX += (session.x - 96 - cameraX) * (1 - math.exp(-10 * step));
+      final lab = session.mechanics;
+      final look = lab == null ? 0.0 : ((lab.speed - 56) * .2).clamp(0.0, 32.0);
+      cameraX += (session.x - 96 + look - cameraX) * (1 - math.exp(-10 * step));
+      // Fit the full drawing bowl before Dot moves; the pointer's world
+      // coordinates must not shift while the player prepares the descent.
+      final vertical = _labVerticalTarget;
+      _labVertical += (vertical - _labVertical) * (1 - math.exp(-12 * step));
+      surf.prune(session.gameTime);
       for (final p in particles) {
         p.age += step;
         p.p = p.p + p.velocity * step;
@@ -273,6 +311,9 @@ class InkGame extends FlameGame {
         session.activeLines,
         session.stuckCountdown,
         session.ledge?.pulls,
+        session.mechanics?.motion,
+        session.mechanics?.holdDot,
+        ((session.mechanics?.speed ?? 0) / 4).round(),
         session.firstDrawDone,
         session.x > 60,
         session.realTime < session.messageUntil,
@@ -318,6 +359,7 @@ class InkGame extends FlameGame {
       }
       _terrain(canvas, s);
     }
+    _drawFoldPage(canvas);
     final next = _nextLevel;
     if (next != null) {
       for (final surface in _nextTerrain) {
@@ -433,31 +475,33 @@ class InkGame extends FlameGame {
       );
     }
     for (final l in session.lines) {
-      final alpha = l.retired
-          ? 1 -
-                Curves.easeInOutCubic.transform(
-                  (session.gameTime - l.retiredAt).clamp(0.0, 1.0).toDouble(),
-                )
-          : 1.0;
-      _line(
-        canvas,
-        l.points,
-        const Color(0xff302c29).withValues(alpha: alpha),
-        4.2 *
-            (.38 +
-                .62 *
-                    Curves.easeOutCubic.transform(
-                      ((visualTime - (_lineBorn[l.id] ?? -1)) / .18)
-                          .clamp(0.0, 1.0)
-                          .toDouble(),
-                    )),
-      );
-      _line(
-        canvas,
-        l.points.map((p) => p + const V(0, .7)).toList(),
-        const Color(0xff9c8774).withValues(alpha: alpha * .35),
-        .7,
-      );
+      for (final contour in l.contours) {
+        final alpha = l.retired
+            ? 1 -
+                  Curves.easeInOutCubic.transform(
+                    (session.gameTime - l.retiredAt).clamp(0.0, 1.0).toDouble(),
+                  )
+            : 1.0;
+        _line(
+          canvas,
+          contour,
+          const Color(0xff302c29).withValues(alpha: alpha),
+          4.2 *
+              (.38 +
+                  .62 *
+                      Curves.easeOutCubic.transform(
+                        ((visualTime - (_lineBorn[l.id] ?? -1)) / .18)
+                            .clamp(0.0, 1.0)
+                            .toDouble(),
+                      )),
+        );
+        _line(
+          canvas,
+          contour.map((p) => p + const V(0, .7)).toList(),
+          const Color(0xff9c8774).withValues(alpha: alpha * .35),
+          .7,
+        );
+      }
     }
     final draft = session.draft;
     if (draft != null) {
@@ -550,6 +594,8 @@ class InkGame extends FlameGame {
       );
     }
     _firstDrawHint(canvas);
+    _drawLab(canvas);
+    _drawSurfTrail(canvas);
     _dot(canvas);
     paperWorld.foreground(
       canvas,
@@ -573,6 +619,18 @@ class InkGame extends FlameGame {
   }
 
   void _terrain(Canvas c, Surface s) {
+    if (session.mechanics != null) {
+      if (s.id == 'lab-pulley' ||
+          s.id.startsWith('lab-paper-sheet:') ||
+          s.id == 'lab-crack' ||
+          s.id == 'lab-repair-bridge') {
+        return;
+      }
+      if (s.a.y > 64) {
+        _labDeck(c, s.a, s.b);
+        return;
+      }
+    }
     if (s.a.y > 64) return;
     final picture = _terrainPictures.putIfAbsent(s, () {
       final recorder = ui.PictureRecorder();
@@ -835,6 +893,22 @@ class InkGame extends FlameGame {
       pose = InkWalkPose.mix(pose, climbingPose, _animation.grip);
       feet = InkGroundPose.mix(feet, climbingFeet, _animation.grip);
     }
+    final sliding = session.mechanics?.sliding ?? false;
+    if (sliding) {
+      pose = const InkWalkPose(
+        InkFootPose(-4, 0, true),
+        InkFootPose(4, 0, true),
+        -1.5,
+        1,
+        1,
+        -.08,
+      );
+      feet = const InkGroundPose(
+        InkFootPlacement(-4.5, 0, 0),
+        InkFootPlacement(4.5, 0, 0),
+        0,
+      );
+    }
     final sw = dot.width / 4, sh = dot.height / 2;
     final src = Rect.fromLTWH(0, 0, sw, sh);
     if (dead) {
@@ -862,13 +936,20 @@ class InkGame extends FlameGame {
     }
     c.save();
     c.translate(q.dx, q.dy);
+    if (sliding) {
+      c.rotate(-session.mechanics!.railAngle);
+      final drawn = surf.drawProgress(session.gameTime);
+      _drawSurfBoard(c, drawn: drawn);
+      c.translate(0, -1.8 * drawn);
+    }
     final landing = ((visualTime - _landAt) / .28).clamp(0.0, 1.0);
     final impact = math.sin(landing * math.pi) * .035;
     final falling = _animation.fall;
     final free = 1 - _animation.grip;
     final rig = InkBodyRig(
       pose.rise + feet.bodyLift,
-      (pose.lean + _groundAngle * .12 * _animation.support) * free,
+      (pose.lean + (sliding ? 0 : _groundAngle * .12 * _animation.support)) *
+          free,
       pose.width + (impact - falling * .025) * free,
       pose.height + (-impact + falling * .045) * free,
     );

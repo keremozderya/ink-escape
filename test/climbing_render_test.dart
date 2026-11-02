@@ -7,7 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ink_escape/core/ink_model.dart';
 import 'package:ink_escape/ink_game.dart';
 
-import 'ledge_grip_test.dart' show ledgeScene;
+import 'ledge_grip_test.dart' show legacyGripScene;
 
 Future<void> renderPose(InkGame game, String name) async {
   final p = game.point(V(game.session.x, game.session.y)) * game.scale;
@@ -67,7 +67,7 @@ void main() {
           }
           game.onRemove();
         }
-        final s = ledgeScene()..advance(1 / 120);
+        final s = legacyGripScene()..advance(1 / 120);
         final game = InkGame(s)..onGameResize(Vector2(960, 540));
         await game.onLoad();
         game.update(.5);

@@ -139,13 +139,14 @@ void main() {
   );
 
   for (var pulls = 0; pulls <= LedgeGrip.requiredPulls; pulls++) {
-    test('Journal reopening preserves $pulls completed ledge pulls', () async {
+    test('Journal reopening preserves $pulls legacy saved ledge pulls', () async {
       final data = gripLevels(), s = InkSession(gripLevels())..start();
       s
-        ..x = 90
-        ..y = .1
-        ..vy = -40
-        ..grounded = false;
+        ..x = 100 - LedgeGrip.bodyInset
+        ..y = -LedgeGrip.hangDepth
+        ..vy = 0
+        ..grounded = false
+        ..ledge = LedgeGrip(const V(100, 0), const V(108, 0));
       s.advance(1 / 120);
       expect(s.ledge, isNotNull);
       for (var i = 0; i < pulls; i++) {

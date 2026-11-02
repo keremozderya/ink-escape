@@ -371,14 +371,14 @@ void main() {
     expect(s.phase, Phase.dead);
   });
   test(
-    'A short bridge leaves Dot hanging at a reachable corner until tapped',
+    'A bridge far short of the bank falls without starting a hand-grip mechanic',
     () {
       final s = game();
-      expect(draw(s, [const V(320, 0), const V(360, 0)]), isTrue);
+      expect(draw(s, [const V(320, 0), const V(340, 0)]), isTrue);
       s.advance(15);
-      expect(s.phase, Phase.playing);
+      expect(s.phase, Phase.dead);
       expect(s.grounded, isFalse);
-      expect(s.ledge?.corner.x, 392);
+      expect(s.ledge, isNull);
       expect(s.x, lessThan(392));
     },
   );

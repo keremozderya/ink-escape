@@ -18,7 +18,10 @@ import 'presentation/journey_hud.dart';
 import 'presentation/centered_menu.dart';
 import 'presentation/drawing_tutorial.dart';
 import 'presentation/drawing_lens.dart';
+import 'presentation/mechanics_thumbnail.dart';
 import 'l10n/ink_strings.dart';
+
+part 'presentation/mechanics_lab_screen.dart';
 
 const paper = Color(0xfff6f1e6),
     inkColor = Color(0xff38312a),
@@ -248,6 +251,7 @@ class GameScreen extends StatefulWidget {
     this.restored = false,
     this.camera,
     this.storageError,
+    this.labCase,
   });
   final InkSession session;
   final SaveJournal journal;
@@ -256,6 +260,7 @@ class GameScreen extends StatefulWidget {
   final bool restored;
   final double? camera;
   final String? storageError;
+  final InkLabCase? labCase;
   @override
   State<GameScreen> createState() => GameScreenState();
 }
@@ -351,6 +356,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _save() async {
+    if (s.mechanics != null) return;
     final snap = s.snapshot()..['cameraX'] = game.cameraX;
     final epoch = s.resetEpoch, wasDead = s.phase == Phase.dead;
     try {
@@ -400,6 +406,10 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
   }
 
   void _returnToMenu() {
+    if (widget.labCase != null) {
+      Navigator.of(context).pop();
+      return;
+    }
     s.pause();
     widget.sound.pause();
     _pointer = null;
@@ -411,6 +421,25 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
       _opening = false;
     });
     unawaited(_save());
+  }
+
+  void _changeLab(VoidCallback change) => setState(change);
+
+  Future<void> _openLab() async {
+    _pause();
+    game.pauseEngine();
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => InkMechanicsPicker(
+          soundEnabled: widget.sound.enabled,
+          musicOn: widget.sound.musicOn,
+          effectsOn: widget.sound.effectsOn,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    game.resumeEngine();
+    setState(() => _mainMenu = true);
   }
 
   void _start() async {
@@ -591,6 +620,16 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                                 .toDouble(),
                           ),
                         ),
+                      ),
+                    ),
+                  if (!_loading && !showMenu && widget.labCase != null)
+                    Positioned(
+                      left: 12,
+                      right: 12,
+                      top: 88 * factor,
+                      child: ValueListenableBuilder<int>(
+                        valueListenable: _hudTick,
+                        builder: (context, _, child) => _labToolbar(),
                       ),
                     ),
                   if (!_loading && !_mainMenu && s.stuckCountdown != null)
@@ -983,7 +1022,9 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
     final ready = _mainMenu || s.phase == Phase.ready,
         dead = s.phase == Phase.dead,
         complete = s.phase == Phase.complete;
-    final title = _settings
+    final title = widget.labCase != null && !_settings
+        ? widget.labCase!.title(strings.code)
+        : _settings
         ? 'Ayarlar'
         : ready
         ? 'INK ESCAPE'
@@ -995,7 +1036,9 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
         ? 'Ayarlar'
         : 'Küçük bir mola.';
     String subtitle;
-    if (_settings) {
+    if (widget.labCase != null && !_settings && ready) {
+      subtitle = widget.labCase!.tip(strings.code);
+    } else if (_settings) {
       subtitle = 'Ses ve dil seçeneklerini kendine göre ayarla.';
     } else if (ready) {
       subtitle = s.lab
@@ -1157,7 +1200,13 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                       ),
                     ] else if (ready) ...[
                       _button(
-                        s.phase == Phase.complete
+                        widget.labCase != null
+                            ? _labText(
+                                strings.code,
+                                'Parkuru aç',
+                                'Open course',
+                              )
+                            : s.phase == Phase.complete
                             ? 'Yeniden başla'
                             : widget.restored || s.x > 0
                             ? 'Devam et'
@@ -1165,6 +1214,16 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         _start,
                         f,
                       ),
+                      if (widget.labCase == null)
+                        KeyedSubtree(
+                          key: const ValueKey('ink-open-mechanics'),
+                          child: _button(
+                            _labText(strings.code, 'Test Alanı', 'Test Area'),
+                            _openLab,
+                            f,
+                            primary: false,
+                          ),
+                        ),
                       if (!s.lab)
                         _button(
                           'Hikâyeyi izle',
@@ -1206,6 +1265,13 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         primary: false,
                       ),
                     ],
+                    if (widget.labCase != null && !_settings)
+                      _button(
+                        _labText(strings.code, 'Testleri seç', 'Choose a test'),
+                        _returnToMenu,
+                        f,
+                        primary: false,
+                      ),
                     if (ready && !_settings) ...[
                       SizedBox(height: 12 * f),
                       Text(
@@ -1214,7 +1280,7 @@ class GameScreenState extends State<GameScreen> with WidgetsBindingObserver {
                         style: TextStyle(fontSize: 13 * f, color: muted),
                       ),
                     ],
-                    if (!_settings && !ready && !dead)
+                    if (!_settings && !ready && !dead && widget.labCase == null)
                       _button(
                         'Ana Menüye Dön',
                         _returnToMenu,

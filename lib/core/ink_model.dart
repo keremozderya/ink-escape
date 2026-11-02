@@ -2,6 +2,11 @@ import 'dart:convert';
 import 'dart:collection';
 import 'dart:math' as math;
 
+part 'mechanics_lab.dart';
+part 'mechanics_courses.dart';
+part 'paper_fold.dart';
+part 'ink_erasure.dart';
+
 /// Track structural edits so immutable collision geometry can be reused.
 class _GeometryList<T> extends ListBase<T> {
   final List<T> _items = [];
@@ -245,21 +250,54 @@ class InkLine {
     : points = List<V>.unmodifiable(points);
   final String id, role;
   final List<V> points;
+  late final List<List<V>> _sourceContours = List.unmodifiable([points]);
+  List<List<V>>? _contours;
+  double? _contourLength, _contourLeft, _contourRight;
+  int geometryRevision = 0;
+  List<List<V>> get contours => _contours ?? _sourceContours;
+  bool get concealed => contours.isEmpty;
+  double get travelLength => _contourLength ?? cost;
+
+  /// Folding and erasure change world contours, never the paid source path.
+  void setContours(List<List<V>> paths) {
+    _contours = List.unmodifiable([
+      for (final path in paths)
+        if (path.length > 1 && pathLength(path) > 1e-7)
+          List<V>.unmodifiable(path),
+    ]);
+    _contourLength = contours.fold<double>(
+      0,
+      (sum, path) => sum + pathLength(path),
+    );
+    final vertices = contours.expand((path) => path).toList();
+    _contourLeft = vertices.isEmpty
+        ? null
+        : vertices.map((p) => p.x).reduce(math.min);
+    _contourRight = vertices.isEmpty
+        ? null
+        : vertices.map((p) => p.x).reduce(math.max);
+    geometryRevision++;
+  }
+
   bool retired = false;
   double retiredAt = 0;
   late final double cost = pathLength(points);
-  late final double left = points.map((p) => p.x).reduce(math.min);
-  late final double right = points.map((p) => p.x).reduce(math.max);
+  late final double _sourceLeft = points.map((p) => p.x).reduce(math.min);
+  late final double _sourceRight = points.map((p) => p.x).reduce(math.max);
+  double get left => _contourLeft ?? _sourceLeft;
+  double get right => _contourRight ?? _sourceRight;
 
   Iterable<(double, double)> crossingsAt(double x) sync* {
-    for (var i = 1; i < points.length; i++) {
-      final a = points[i - 1], b = points[i];
-      final dx = b.x - a.x;
-      // Vertical strokes are walls, never horizontal support or a NaN height.
-      if (dx.abs() <= 1e-7) continue;
-      if (x >= math.min(a.x, b.x) - .001 && x <= math.max(a.x, b.x) + .001) {
-        final slope = (b.y - a.y) / dx;
-        yield (a.y + slope * (x - a.x), slope);
+    for (final points in contours) {
+      for (var i = 1; i < points.length; i++) {
+        final a = points[i - 1], b = points[i];
+        final dx = b.x - a.x;
+        // Vertical strokes are walls, never horizontal support or a NaN height.
+        if (dx.abs() <= 1e-7) continue;
+        if (x >= math.min(a.x, b.x) - .001 && x <= math.max(a.x, b.x) + .001) {
+          final slope = (b.y - a.y) / dx;
+          yield (a.y + slope * (x - a.x), slope);
+        }
       }
     }
   }
@@ -281,19 +319,23 @@ class InkLine {
   }
 
   (V, double) atDistance(double s) {
-    for (var i = 1; i < points.length; i++) {
-      final a = points[i - 1], b = points[i];
-      final length = a.distance(b);
-      if (length <= 1e-7) continue;
-      if (s <= length || i == points.length - 1) {
-        return (
-          a + (b - a) * (s / length).clamp(0.0, 1.0).toDouble(),
-          (b.y - a.y) / length,
-        );
+    var tangent = 0.0;
+    for (final points in contours) {
+      for (var i = 1; i < points.length; i++) {
+        final a = points[i - 1], b = points[i];
+        final length = a.distance(b);
+        if (length <= 1e-7) continue;
+        tangent = (b.y - a.y) / length;
+        if (s <= length) {
+          return (
+            a + (b - a) * (s / length).clamp(0.0, 1.0).toDouble(),
+            (b.y - a.y) / length,
+          );
+        }
+        s -= length;
       }
-      s -= length;
     }
-    return (points.last, 0);
+    return (contours.isEmpty ? points.first : contours.last.last, tangent);
   }
 
   Map<String, dynamic> toJson() => {
@@ -324,10 +366,11 @@ class Draft {
 
 /// A nonvertical floor segment, ordered in Dot's direction of travel.
 class _GroundSegment {
-  _GroundSegment(this.a, this.b, this.natural)
+  _GroundSegment(this.a, this.b, this.natural, {this.thin = false})
     : slope = (b.y - a.y) / (b.x - a.x);
   final V a, b;
   final bool natural;
+  final bool thin;
   final double slope;
   late final double lengthPerX = math.sqrt(1 + slope * slope);
   double yAt(double xx) => a.y + (xx - a.x) * slope;
@@ -557,6 +600,7 @@ class InkSession {
   final List<Map<String, dynamic>> levelData;
   final bool lab;
   late Level level;
+  MechanicsLab? mechanics;
   int levelIndex = 0, strokeSerial = 0, resetEpoch = 0;
   Phase phase = Phase.ready;
   double ink = 180, entryInk = 180;
@@ -568,6 +612,7 @@ class InkSession {
   double get levelProgress => (x / level.width).clamp(0.0, 1.0).toDouble();
   static const maxClimbDegrees = 55.0, stuckLimit = 3.0, dotHeight = 32.0;
   static const autoJumpHeight = dotHeight * .75;
+  static const cornerStepHeight = 4.0, maxCornerFallSpeed = 64.0;
   static const _gravity = 160.0, _bodyHalfWidth = 12.0;
   static final maxClimbSlope = math.tan(maxClimbDegrees * math.pi / 180);
   double _stuckElapsed = 0;
@@ -579,6 +624,7 @@ class InkSession {
   Level? _geometryLevel;
   int _terrainRevision = -1, _lineRevision = -1;
   List<bool> _retiredStates = [];
+  List<int> _lineShapeRevisions = [];
   List<_GroundSegment> _segments = [], _nearSegments = [];
   List<_ClimbRun> _climbs = [];
   List<_PaperWall> _paperWalls = [];
@@ -592,11 +638,11 @@ class InkSession {
   bool firstDrawDone = false;
   bool drawingTutorialDone = false, ledgeTutorialDone = false;
   bool migratedLayout = false;
-  double get walkSpeed => lab ? 32 : 56;
+  double get walkSpeed => lab && mechanics == null ? 32 : 56;
   void Function(String, V)? onEvent;
   void Function(bool)? onSaveRequested;
   double saveElapsed = 0;
-  int get activeLines => lines.where((l) => !l.retired).length;
+  int get activeLines => solidLines.length;
   int? get stuckCountdown {
     // Ordinary walking briefly stays within the one-unit progress radius.
     // Wait long enough to avoid a warning flashing on every normal footstep.
@@ -606,9 +652,15 @@ class InkSession {
     return (stuckLimit - _stuckElapsed).ceil().clamp(1, 3);
   }
 
-  Iterable<InkLine> get solidLines => lines.where((l) => !l.retired);
+  Iterable<InkLine> get solidLines =>
+      lines.where((l) => !l.retired && !l.concealed);
   void _loadLevel() {
     level = Level.from(levelData[levelIndex]);
+    final experiment = levelData[levelIndex]['experiment'];
+    mechanics = lab && experiment is String
+        ? MechanicsLab(this, InkLabCase.byId(experiment))
+        : null;
+    mechanics?.prepare();
   }
 
   void emit(String name, [V? at]) {
@@ -623,9 +675,16 @@ class InkSession {
   }
 
   Anchor? anchorAt(V p) {
+    final pageAnchor = mechanics?.paper?.anchorAt(p);
+    if (pageAnchor != null) return pageAnchor;
     Anchor? best;
     var distance = 20.0;
     for (final s in [...level.terrain, ...level.anchors]) {
+      // Pulley decks are not anchors; fold-page material anchors resolve above.
+      if (mechanics != null &&
+          (s.id == 'lab-pulley' || s.id.startsWith('lab-paper-sheet:'))) {
+        continue;
+      }
       if (s.id == 'previous-tail') {
         continue;
       }
@@ -661,6 +720,7 @@ class InkSession {
       return false;
     }
     draft = Draft(a, [a.point]);
+    mechanics?.beginStroke(p);
     strokePointerActive = true;
     emit('penStart', a.point);
     return true;
@@ -697,7 +757,7 @@ class InkSession {
     raw[raw.length - 1] = end != null && end.point.distance(d.rawPoint) <= 6
         ? end.point
         : d.rawPoint;
-    final p = smoothStroke(raw);
+    final p = smoothStroke(mechanics?.normalizeStroke(raw) ?? raw);
     final cost = pathLength(p);
     if (cost < 12) {
       return (null, 'Biraz daha uzun bir çizgi çiz.');
@@ -734,6 +794,7 @@ class InkSession {
     final line = InkLine('ink:${strokeSerial++}', p, role: role);
     ink -= line.cost;
     lines.add(line);
+    mechanics?.paper?.bind(line, a);
     draft = null;
     firstDrawDone = true;
     emit('commit', p.last);
@@ -849,12 +910,14 @@ class InkSession {
       saveElapsed += h;
       final worldDt = h - .6 * slow;
       gameTime += worldDt;
-      _walk(worldDt);
+      mechanics?.beforeStep(worldDt);
+      if (!(mechanics?.holdDot ?? false)) _walk(worldDt);
       _trackProgress(h);
       _balls(worldDt);
       _rain(worldDt);
       _collect();
       _gates();
+      mechanics?.afterStep(worldDt);
       _retire();
       if (grounded &&
           onNatural &&
@@ -889,10 +952,12 @@ class InkSession {
         identical(level, _geometryLevel) &&
         terrainRevision == _terrainRevision &&
         lineRevision == _lineRevision &&
-        _retiredStates.length == lines.length;
+        _retiredStates.length == lines.length &&
+        _lineShapeRevisions.length == lines.length;
     if (unchanged) {
       for (var i = 0; i < lines.length; i++) {
-        if (_retiredStates[i] != lines[i].retired) {
+        if (_retiredStates[i] != lines[i].retired ||
+            _lineShapeRevisions[i] != lines[i].geometryRevision) {
           unchanged = false;
           break;
         }
@@ -903,6 +968,7 @@ class InkSession {
     _terrainRevision = terrainRevision;
     _lineRevision = lineRevision;
     _retiredStates = lines.map((line) => line.retired).toList();
+    _lineShapeRevisions = lines.map((line) => line.geometryRevision).toList();
     _segments = _buildGroundSegments()..sort((a, b) => a.a.x.compareTo(b.a.x));
     _climbs = _buildClimbRuns().toList();
     _paperWalls = _buildPaperWalls();
@@ -932,19 +998,28 @@ class InkSession {
     final segments = <_GroundSegment>[];
     for (final s in level.terrain) {
       if (s.b.x - s.a.x > 1e-7) {
-        segments.add(_GroundSegment(s.a, s.b, true));
+        segments.add(
+          _GroundSegment(
+            s.a,
+            s.b,
+            true,
+            thin: s.id.startsWith('lab-paper-sheet:') || s.id == 'lab-pulley',
+          ),
+        );
       }
     }
     for (final line in solidLines) {
-      for (var i = 1; i < line.points.length; i++) {
-        var a = line.points[i - 1], b = line.points[i];
-        if ((b.x - a.x).abs() <= 1e-7) continue;
-        if (a.x > b.x) {
-          final swap = a;
-          a = b;
-          b = swap;
+      for (final points in line.contours) {
+        for (var i = 1; i < points.length; i++) {
+          var a = points[i - 1], b = points[i];
+          if ((b.x - a.x).abs() <= 1e-7) continue;
+          if (a.x > b.x) {
+            final swap = a;
+            a = b;
+            b = swap;
+          }
+          segments.add(_GroundSegment(a, b, false));
         }
-        segments.add(_GroundSegment(a, b, false));
       }
     }
     return segments;
@@ -962,7 +1037,14 @@ class InkSession {
         ))
           // Elevated anchor pads are thin shelves; ordinary paper is filled
           // down to the fall boundary, matching the visible torn bank.
-          _PaperWall(floor, floor.a.y > 64 ? floor.a.y - 8 : -300),
+          _PaperWall(
+            floor,
+            floor.thin
+                ? floor.a.y - 6
+                : floor.a.y > 64
+                ? floor.a.y - 8
+                : -300,
+          ),
     ];
   }
 
@@ -976,7 +1058,7 @@ class InkSession {
     for (final segment in segments) {
       if (!segment.contains(at.x)) continue;
       final delta = (segment.yAt(at.x) - at.y).abs();
-      if (delta > error + 1e-7) continue;
+      if (delta > .75 + 1e-7) continue;
       final continues = direction > 0
           ? segment.b.x > at.x + 1e-7
           : segment.a.x < at.x - 1e-7;
@@ -984,16 +1066,74 @@ class InkSession {
           best != null &&
           (direction > 0 ? best.b.x > at.x + 1e-7 : best.a.x < at.x - 1e-7);
       if (best == null ||
-          delta < error - 1e-7 ||
-          (delta <= error + 1e-7 &&
-              (continues && !bestContinues ||
-                  continues == bestContinues &&
-                      segment.slope * direction > best.slope * direction))) {
+          // At an endpoint, hand off to a connected forward contour even
+          // when its height differs by a fraction of a drawing unit.
+          continues && !bestContinues ||
+          continues == bestContinues &&
+              (delta < error - 1e-7 ||
+                  delta <= error + 1e-7 &&
+                      segment.slope * direction > best.slope * direction)) {
         best = segment;
         error = delta;
       }
     }
     return best;
+  }
+
+  /// A shoe can still rest on an endpoint while the body centre is outside it.
+  /// Support ends at the actual foot span; this is not a timed airborne grace.
+  (_GroundSegment, V)? _footSupport(List<_GroundSegment> segments, V at) {
+    (_GroundSegment, V)? best;
+    var nearest = _bodyHalfWidth + 1e-7;
+    for (final floor in segments) {
+      if (floor.contains(at.x) && at.x < floor.b.x - 1e-7 ||
+          floor.slope > maxClimbSlope) {
+        continue;
+      }
+      final xx = at.x.clamp(floor.a.x, floor.b.x);
+      final gap = (at.x - xx).abs(), yy = floor.yAt(xx);
+      if (gap > nearest || (yy - at.y).abs() > .75) continue;
+      if (best == null || gap < nearest - 1e-7 || xx > best.$2.x) {
+        best = (floor, V(xx, yy));
+        nearest = gap;
+      }
+    }
+    return best;
+  }
+
+  /// Bevel only the top few units of an exposed paper face when the front
+  /// shoe reaches it. Keep full side collision below that tiny corner band.
+  _GroundSegment? _cornerLanding(
+    List<_GroundSegment> segments,
+    V at,
+    double fallSpeed,
+  ) {
+    if (fallSpeed > 0 || fallSpeed < -maxCornerFallSpeed) return null;
+    for (final wall in _paperWalls) {
+      if (wall.x > at.x + _bodyHalfWidth + 1e-7) break;
+      final rise = wall.top - at.y, floor = wall.floor;
+      if (wall.x < at.x - .001 ||
+          rise < -.75 ||
+          rise > cornerStepHeight ||
+          floor.slope > maxClimbSlope ||
+          floor.b.x - floor.a.x < 2) {
+        continue;
+      }
+      var clear = true;
+      for (final roof in segments) {
+        if (identical(roof, floor)) continue;
+        final left = math.max(at.x - _bodyHalfWidth, roof.a.x);
+        final right = math.min(at.x + _bodyHalfWidth, roof.b.x);
+        if (left > right) continue;
+        final low = math.min(roof.yAt(left), roof.yAt(right));
+        if (low > wall.top + .75 && low < wall.top + dotHeight - 1e-7) {
+          clear = false;
+          break;
+        }
+      }
+      if (clear && !_blockedAhead(at.x, wall.top, _climbs)) return floor;
+    }
+    return null;
   }
 
   double _junctionX(
@@ -1041,7 +1181,21 @@ class InkSession {
     final all = _groundSegments, nearby = _nearGround;
     final origin = cornerSupport ?? V(x, y);
     final step = _support(nearby, origin) == null ? _stepUnderFoot() : null;
+    final foot = step == null && _support(nearby, origin) == null
+        ? _footSupport(nearby, origin)
+        : null;
     return (distance) {
+      if (foot != null) {
+        final floor = foot.$1, desiredX = origin.x + distance;
+        final xx = desiredX.clamp(floor.a.x, floor.b.x);
+        // Only the contacting shoe follows the lip. Do not stretch both legs
+        // by shifting the whole walking contour to a distant endpoint.
+        if ((xx - desiredX).abs() > 3 ||
+            (xx - origin.x).abs() > _bodyHalfWidth + 1e-7) {
+          return null;
+        }
+        return V(xx, floor.yAt(xx));
+      }
       final segments = distance.abs() <= 24 ? nearby : all;
       final direction = distance < 0 ? -1.0 : 1.0;
       var point = origin, remaining = distance.abs();
@@ -1074,6 +1228,8 @@ class InkSession {
     if (!grounded) return 0;
     final floor = _support(_nearGround, V(x, y));
     if (floor != null) return floor.slope;
+    final foot = _footSupport(_nearGround, V(x, y));
+    if (foot != null) return foot.$1.slope;
     final step = _stepUnderFoot();
     if (step == null) return 0;
     final a = step.$1.path.atDistance(math.max(0, step.$2 - .1)).$1;
@@ -1084,6 +1240,7 @@ class InkSession {
   }
 
   void _walk(double dt) {
+    if (mechanics?.move(dt) ?? false) return;
     if (ledge != null && _advanceGrip(dt)) return;
     if (cornerSupport != null && _walkFromCorner(dt)) return;
     _ensureGeometry();
@@ -1121,6 +1278,27 @@ class InkSession {
           continue;
         }
       }
+      if (floor == null || floor.b.x <= x + 1e-7) {
+        // A newly drawn path above the open lip takes precedence over the
+        // trailing shoe; otherwise Dot would walk underneath that path.
+        if (_stepOntoRaisedInk(segments)) continue;
+        final foot = _footSupport(segments, V(x, y));
+        if (foot != null) {
+          final edge = foot.$1;
+          final dx = math.min(
+            walkSpeed * remaining,
+            math.max(0.0, edge.b.x + _bodyHalfWidth - x),
+          );
+          final nextX = _paperSideLimit(x + dx, y);
+          if (nextX > x + 1e-7 && !_blockedAhead(nextX, y, climbs)) {
+            final target = V(nextX, edge.yAt(nextX.clamp(edge.a.x, edge.b.x)));
+            final duration = target.distance(V(x, y)) / walkSpeed;
+            _walkTo(target, edge.natural);
+            remaining = math.max(0.0, remaining - duration);
+            continue;
+          }
+        }
+      }
       if (_stepOntoRaisedInk(segments)) continue;
       grounded = false;
       onNatural = false;
@@ -1128,8 +1306,18 @@ class InkSession {
     }
     if (grounded || remaining <= 1e-9) return;
     final previous = V(x, y);
-    final nextX = _paperSideLimit(x + walkSpeed * remaining, y);
     vy -= _gravity * remaining;
+    final intended = V(x + walkSpeed * remaining, y + vy * remaining);
+    final corner = _cornerLanding(segments, intended, vy);
+    if (corner != null) {
+      _walkTo(
+        V(intended.x, corner.yAt(intended.x.clamp(corner.a.x, corner.b.x))),
+        true,
+      );
+      emit('land', corner.a);
+      return;
+    }
+    final nextX = _paperSideLimit(intended.x, y);
     var next = V(
       _blockedAhead(nextX, y, climbs) ? x : nextX,
       y + vy * remaining,
@@ -1183,7 +1371,6 @@ class InkSession {
       // A line can be finished just after Dot passes its first point. Recover
       // only while his feet are still within one short step of the paper lip.
       if (vy <= 0 && vy > -30 && _stepOntoRaisedInk(segments)) return;
-      _tryGrip(previous, next, segments);
     }
   }
 
@@ -1242,47 +1429,6 @@ class InkSession {
     onNatural = false;
     emit('land');
     return true;
-  }
-
-  void _tryGrip(V previous, V next, List<_GroundSegment> segments) {
-    if (vy >= 0 || next.y > previous.y + 1e-7) return;
-    _GroundSegment? chosen;
-    var nearest = double.infinity;
-    for (final floor in segments) {
-      final corner = floor.a;
-      if (floor.slope > maxClimbSlope || floor.b.x - corner.x < .01) continue;
-      // Only the approaching, exposed corner can be caught. Never re-grab the
-      // platform Dot just walked off or a vertex inside a continuous contour.
-      final reach = corner.x - next.x;
-      if (reach < -2 || reach > 12 || corner.x + 2 < previous.x) continue;
-      final rise = corner.y - next.y;
-      if (rise < -2 || rise > LedgeGrip.hangDepth + 2) continue;
-      final blocked = segments.any(
-        (other) =>
-            !identical(other, floor) &&
-            other.a.x < corner.x - .01 &&
-            other.contains(corner.x - .01) &&
-            (other.yAt(corner.x) - corner.y).abs() < .75,
-      );
-      if (blocked || reach >= nearest) continue;
-      nearest = reach;
-      chosen = floor;
-    }
-    if (chosen == null) return;
-    final targetX = math.min(chosen.a.x + 8, chosen.b.x);
-    ledge = LedgeGrip(chosen.a, V(targetX, chosen.yAt(targetX)));
-    x = chosen.a.x - LedgeGrip.bodyInset;
-    y = chosen.a.y - LedgeGrip.hangDepth;
-    cornerSupport = null;
-    grounded = false;
-    onNatural = false;
-    vy = 0;
-    _stuckElapsed = 0;
-    draft = null;
-    strokePointerActive = false;
-    emit('penStop');
-    emit('ledgeGrab', chosen.a);
-    onSaveRequested?.call(true);
   }
 
   bool pullLedge() {
@@ -1405,10 +1551,11 @@ class InkSession {
       ..sort((a, b) => a.a.x.compareTo(b.a.x));
     yield* _groupClimbs(terrain.map((s) => (s.a, s.b)), true);
     for (final line in solidLines) {
-      yield* _groupClimbs([
-        for (var i = 1; i < line.points.length; i++)
-          (line.points[i - 1], line.points[i]),
-      ], false);
+      for (final points in line.contours) {
+        yield* _groupClimbs([
+          for (var i = 1; i < points.length; i++) (points[i - 1], points[i]),
+        ], false);
+      }
     }
   }
 
@@ -1488,7 +1635,7 @@ class InkSession {
     for (final wall in _paperWalls) {
       if (wall.x > nextX + _bodyHalfWidth) break;
       if (wall.x < x - _bodyHalfWidth ||
-          wall.top <= feetY + .5 ||
+          wall.top <= feetY + .75 ||
           wall.bottom >= feetY + dotHeight) {
         continue;
       }
@@ -1527,6 +1674,11 @@ class InkSession {
   }
 
   void _trackProgress(double dt) {
+    if (mechanics?.holdDot ?? false) {
+      _stuckElapsed = 0;
+      _progressPoint = V(x, y);
+      return;
+    }
     if (ledge != null) {
       _stuckElapsed = 0;
       _progressPoint = V(x, y);
@@ -1574,7 +1726,7 @@ class InkSession {
         b.speed = b.initialSpeed;
         b.position = b.source;
         for (final l in solidLines) {
-          if (l.points.first.distance(b.source - const V(0, 8)) <= 22) {
+          if (l.contours.first.first.distance(b.source - const V(0, 8)) <= 22) {
             b.railId = l.id;
             break;
           }
@@ -1587,14 +1739,19 @@ class InkSession {
       final rail = lines
           .where((l) => l.id == b.railId && !l.retired)
           .firstOrNull;
-      if (rail != null && !b.missed) {
+      if (rail != null && !rail.concealed && !b.missed) {
+        final railLength = rail.contours.length == 1
+            ? rail.travelLength
+            : pathLength(rail.contours.first);
         final (_, tangentY) = rail.atDistance(b.distanceOnRail);
         final acceleration = -160 * tangentY - b.friction;
         final nextSpeed = math.max(0.0, b.speed + acceleration * dt);
         b.distanceOnRail += (b.speed + nextSpeed) * .5 * dt;
         b.speed = nextSpeed;
-        b.position = rail.atDistance(b.distanceOnRail).$1 + const V(0, 8);
-        if (b.distanceOnRail >= rail.cost) {
+        b.position =
+            rail.atDistance(math.min(b.distanceOnRail, railLength)).$1 +
+            const V(0, 8);
+        if (b.distanceOnRail >= railLength) {
           if (b.position.distance(b.receiver) <= 22) {
             b.captured = true;
             b.position = b.receiver;
@@ -1688,7 +1845,7 @@ class InkSession {
       if (!dependent && (objectFinished || past)) {
         l.retired = true;
         l.retiredAt = gameTime;
-        emit('dissolve', l.points.last);
+        emit('dissolve', l.contours.last.last);
       }
     }
     lines.removeWhere((l) => l.retired && gameTime - l.retiredAt > 1);

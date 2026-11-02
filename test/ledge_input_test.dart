@@ -6,18 +6,18 @@ import 'package:ink_escape/main.dart';
 import 'package:ink_escape/soundscape.dart';
 
 import 'journey_hud_test.dart' show loadArt, capture;
-import 'ledge_grip_test.dart' show ledgeScene;
+import 'ledge_grip_test.dart' show legacyGripScene;
 
 void main() {
   testWidgets(
-    'The corner prompt receives completed taps, pauses safely and returns to drawing',
+    'A legacy saved corner prompt still receives taps and resumes safely',
     (tester) async {
       tester.view.physicalSize = const Size(960, 540);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       await loadArt(tester);
-      final s = ledgeScene()..advance(1 / 120);
+      final s = legacyGripScene()..advance(1 / 120);
       final store = MemoryStore(), key = GlobalKey();
       await tester.pumpWidget(
         RepaintBoundary(

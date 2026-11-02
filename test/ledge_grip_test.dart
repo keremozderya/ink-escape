@@ -23,11 +23,18 @@ InkSession ledgeScene({
     ..grounded = false;
 }
 
+/// Compatibility fixture only. Ordinary play no longer starts a hand grip.
+InkSession legacyGripScene({bool ink = false}) => ledgeScene(ink: ink)
+  ..x = 100 - LedgeGrip.bodyInset
+  ..y = -LedgeGrip.hangDepth
+  ..vy = 0
+  ..ledge = LedgeGrip(const V(100, 0), const V(108, 0));
+
 void main() {
   test(
-    'Every pull raises Dot vertically, then walking resumes without a forward snap',
+    'A legacy saved grip can still finish without a forward snap',
     () {
-      final s = ledgeScene()..advance(1 / 120);
+      final s = legacyGripScene()..advance(1 / 120);
       final heldX = s.x, corner = s.ledge!.corner;
       expect(corner.x - heldX, LedgeGrip.bodyInset);
       var previousY = s.y;
@@ -66,11 +73,17 @@ void main() {
       reason: 'A drop below the actual palm cannot trigger a grab',
     );
   });
+  test('A missed corner falls without starting a tap interaction in story play', () {
+    final s = ledgeScene(y: -5, vy: -10)..advance(.5);
+    expect(s.ledge, isNull);
+    expect(s.grounded, isFalse);
+    expect(s.y, lessThan(-5));
+  });
   for (final ink in [false, true]) {
     test(
-      'Touching a ${ink ? 'drawn' : 'paper'} corner hangs; five pulls climb onto it',
+      'A legacy grip on ${ink ? 'ink' : 'paper'} remains compatible with its saved pulls',
       () {
-        final s = ledgeScene(ink: ink);
+        final s = legacyGripScene(ink: ink);
         s.advance(1 / 120);
         expect(s.ledge, isNotNull);
         expect(s.grounded, isFalse);
@@ -99,7 +112,7 @@ void main() {
   }
 
   test(
-    'The hand must actually reach an approaching corner while descending',
+    'Approaching corners never starts the cancelled hand-grip mechanic',
     () {
       for (final config in [
         (80.0, .1, -40.0),
@@ -117,7 +130,9 @@ void main() {
         );
       }
       final grazing = ledgeScene(y: -1, vy: -10)..advance(1 / 120);
-      expect(grazing.ledge, isNotNull);
+      expect(grazing.ledge, isNull);
+      expect(grazing.grounded, isTrue);
+      expect(grazing.y, 0);
     },
   );
 
@@ -136,7 +151,7 @@ void main() {
   );
 
   test('Pausing and restoring preserve the grip and completed pulls', () {
-    final s = ledgeScene()..advance(1 / 120);
+    final s = legacyGripScene()..advance(1 / 120);
     s.pullLedge();
     s.advance(.15);
     s.pullLedge();
@@ -195,7 +210,7 @@ void main() {
   test(
     'Retiring the supporting ink releases the grip instead of holding thin air',
     () {
-      final s = ledgeScene(ink: true)..advance(1 / 120);
+      final s = legacyGripScene(ink: true)..advance(1 / 120);
       expect(s.ledge, isNotNull);
       s.lines.single.retired = true;
       s.advance(.1);

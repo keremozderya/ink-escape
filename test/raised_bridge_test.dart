@@ -32,11 +32,11 @@ void main() {
       });
     }
   }
-  test('Bridge finished just after Dot passes its start catches his feet', () {
+  test('A late bridge catches Dot while a trailing foot still supports him', () {
     final s = bridge(7)..lines.clear();
     s.advance(.08);
     expect(s.x, greaterThan(100));
-    expect(s.grounded, isFalse);
+    expect(s.grounded, isTrue);
     s.lines.add(InkLine('late', [const V(100, 7), const V(180, 7)]));
     s.advance(1 / 120);
     expect(s.grounded, isTrue);
