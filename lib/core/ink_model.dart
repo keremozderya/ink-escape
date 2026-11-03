@@ -6,6 +6,8 @@ part 'mechanics_lab.dart';
 part 'mechanics_courses.dart';
 part 'paper_fold.dart';
 part 'ink_erasure.dart';
+part 'stroke_contact.dart';
+part 'ink_obstacles.dart';
 
 /// Track structural edits so immutable collision geometry can be reused.
 class _GeometryList<T> extends ListBase<T> {
@@ -357,7 +359,7 @@ class InkLine {
 
 class Draft {
   Draft(this.start, this.points) : rawPoint = points.last;
-  final Anchor start;
+  final Anchor? start;
   final List<V> points;
   V rawPoint;
   bool backwards = false;
@@ -366,15 +368,23 @@ class Draft {
 
 /// A nonvertical floor segment, ordered in Dot's direction of travel.
 class _GroundSegment {
-  _GroundSegment(this.a, this.b, this.natural, {this.thin = false})
+  _GroundSegment(this.a, this.b, this.natural, {this.thin = false, this.ink})
     : slope = (b.y - a.y) / (b.x - a.x);
   final V a, b;
   final bool natural;
   final bool thin;
+  final InkLine? ink;
   final double slope;
   late final double lengthPerX = math.sqrt(1 + slope * slope);
   double yAt(double xx) => a.y + (xx - a.x) * slope;
   bool contains(double xx) => xx >= a.x - 1e-6 && xx <= b.x + 1e-6;
+}
+
+/// An exposed end of a walkable ink contour still connected to paper.
+class _InkEntry {
+  const _InkEntry(this.line, this.point);
+  final InkLine line;
+  final V point;
 }
 
 /// Exposed left side of solid paper. Ink is a contour, not a filled block.
@@ -428,9 +438,43 @@ class Level {
   final List<Gate> gates = [];
   final List<Ball> balls = [];
   final List<Rain> rain = [];
+  final List<InkSpikeBed> spikes = [];
+  final List<InkWallSaw> wallSaws = [];
   final List<List<double>> hazards = [];
   final List<List<double>> noRegen = [];
   final List<Map<String, dynamic>> reference = [];
+
+  void _readObstacles(
+    Map<String, dynamic> data, {
+    double offset = 0,
+    String prefix = '',
+  }) {
+    for (final raw in (data['spikes'] as List? ?? const [])) {
+      spikes.add(
+        InkSpikeBed(
+          '$prefix${raw['id'] ?? 'spikes:${spikes.length}'}',
+          offset + (raw['left'] as num).toDouble(),
+          offset + (raw['right'] as num).toDouble(),
+          y: (raw['y'] as num?)?.toDouble() ?? 0,
+          height: (raw['height'] as num?)?.toDouble() ?? 10,
+          pitch: (raw['pitch'] as num?)?.toDouble() ?? 10,
+        ),
+      );
+    }
+    for (final raw in (data['wallSaws'] as List? ?? const [])) {
+      wallSaws.add(
+        InkWallSaw(
+          '$prefix${raw['id'] ?? 'wall-saw:${wallSaws.length}'}',
+          V.from(raw['mount']) + V(offset, 0),
+          direction: (raw['direction'] as num?)?.toInt() ?? -1,
+          radius: (raw['radius'] as num?)?.toDouble() ?? 16,
+          reach: (raw['reach'] as num?)?.toDouble() ?? 34,
+          period: (raw['period'] as num?)?.toDouble() ?? 5.6,
+          offset: (raw['offset'] as num?)?.toDouble() ?? 0,
+        ),
+      );
+    }
+  }
 
   static Level from(Map<String, dynamic> m) {
     final l = Level(
@@ -438,12 +482,14 @@ class Level {
       m['title'] as String,
       (m['width'] as num).toDouble(),
     );
+    l._readObstacles(m);
     // Safe tail behind the origin keeps the camera seamless after a level boundary.
     l.terrain.add(Surface('previous-tail', const V(-512, 0), const V(0, 0)));
     for (final dynamic rawCell in m['cells'] as List) {
       final c = Map<String, dynamic>.from(rawCell as Map);
       final ox = (c['offset_x'] as num).toDouble();
       final ci = c['index'];
+      l._readObstacles(c, offset: ox, prefix: '$ci:');
       V wp(dynamic a) => V.from(a) + V(ox, 0);
       var index = 0;
       for (final r in c['route'] as List) {
@@ -612,6 +658,9 @@ class InkSession {
   double get levelProgress => (x / level.width).clamp(0.0, 1.0).toDouble();
   static const maxClimbDegrees = 55.0, stuckLimit = 3.0, dotHeight = 32.0;
   static const autoJumpHeight = dotHeight * .75;
+  // The open end of a paper-connected ink path can be hopped onto from its
+  // side, with a little clearance over Dot's existing body height.
+  static const inkEntryHeight = dotHeight + 4;
   static const cornerStepHeight = 4.0, maxCornerFallSpeed = 64.0;
   static const _gravity = 160.0, _bodyHalfWidth = 12.0;
   static final maxClimbSlope = math.tan(maxClimbDegrees * math.pi / 180);
@@ -627,6 +676,7 @@ class InkSession {
   List<int> _lineShapeRevisions = [];
   List<_GroundSegment> _segments = [], _nearSegments = [];
   List<_ClimbRun> _climbs = [];
+  List<_InkEntry> _inkEntries = [];
   List<_PaperWall> _paperWalls = [];
   double _nearLeft = double.infinity, _nearRight = double.negativeInfinity;
   final Set<String> collected = {};
@@ -715,14 +765,11 @@ class InkSession {
       return false;
     }
     final a = anchorAt(p);
-    if (a == null) {
-      hint('Sabit bir kâğıt kenarından başla.');
-      return false;
-    }
-    draft = Draft(a, [a.point]);
+    final first = a?.point ?? p;
+    draft = Draft(a, [first]);
     mechanics?.beginStroke(p);
     strokePointerActive = true;
-    emit('penStart', a.point);
+    emit('penStart', first);
     return true;
   }
 
@@ -741,37 +788,43 @@ class InkSession {
     }
     d.rawPoint = p;
     final alpha = ((p - last).length / 7).clamp(.42, .96).toDouble();
-    final filtered = last + (p - last) * alpha;
+    final contact = d.start == null ? _pointContact(p) : null;
+    final filtered = contact?.point ?? last + (p - last) * alpha;
     d.points.add(filtered);
     emit('penMove', filtered);
   }
 
   (List<V>?, String) validatedDraft() {
+    final (points, _, error) = _validatedStroke();
+    return (points, error);
+  }
+
+  (List<V>?, Anchor?, String) _validatedStroke() {
     final d = draft;
     if (d == null || d.points.length < 2) {
-      return (null, 'Sabit bir kenardan başlayıp yolunu çiz.');
+      return (null, null, 'Bir yol çiz ve bir kısmını kâğıda değdir.');
     }
-    final raw = List<V>.of(d.points)..[0] = d.start.point;
-    // Release may happen in open space. Nearby paper still offers a gentle snap.
+    final raw = List<V>.of(d.points);
+    if (d.start != null) raw[0] = d.start!.point;
+    // Either end can remain free. Nearby paper still offers a gentle end snap.
     final end = anchorAt(d.rawPoint);
     raw[raw.length - 1] = end != null && end.point.distance(d.rawPoint) <= 6
         ? end.point
         : d.rawPoint;
-    final p = smoothStroke(mechanics?.normalizeStroke(raw) ?? raw);
-    final cost = pathLength(p);
-    if (cost < 12) {
-      return (null, 'Biraz daha uzun bir çizgi çiz.');
+    final normalized = mechanics?.normalizeStroke(raw) ?? raw;
+    final contact = _drawingContact(normalized);
+    if (contact == null) {
+      return (null, null, 'Çizginin bir noktası kâğıda değsin.');
     }
-    if (cost > 220) {
-      return (null, 'Çizgi 220 birimi aşmasın.');
-    }
+    final points = _smoothContact(normalized, contact);
+    final cost = pathLength(points);
+    if (cost < 12) return (null, null, 'Biraz daha uzun bir çizgi çiz.');
+    if (cost > 220) return (null, null, 'Çizgi 220 birimi aşmasın.');
     if (cost > ink + 1e-7) {
-      return (null, 'Bu şekil için mürekkep yetmiyor.');
+      return (null, null, 'Bu şekil için mürekkep yetmiyor.');
     }
-    if (activeLines >= 2) {
-      return (null, 'İki çizgi hâlâ görevde.');
-    }
-    return (p, '');
+    if (activeLines >= 2) return (null, null, 'İki çizgi hâlâ görevde.');
+    return (points, contact.anchor, '');
   }
 
   bool endStroke() {
@@ -780,14 +833,14 @@ class InkSession {
     }
     strokePointerActive = false;
     emit('penStop');
-    final (p, error) = validatedDraft();
+    final (p, contact, error) = _validatedStroke();
     if (p == null) {
       draft = null;
       hint(error);
       return false;
     }
     var role = 'walk';
-    final a = draft!.start.surface;
+    final a = contact!.surface;
     if (a.tag != 'ground') {
       role = a.tag;
     }
@@ -909,9 +962,11 @@ class InkSession {
       activeTotal += h;
       saveElapsed += h;
       final worldDt = h - .6 * slow;
+      final before = V(x, y), beforeTime = gameTime;
       gameTime += worldDt;
       mechanics?.beforeStep(worldDt);
       if (!(mechanics?.holdDot ?? false)) _walk(worldDt);
+      if (_checkObstacles(before, beforeTime)) return;
       _trackProgress(h);
       _balls(worldDt);
       _rain(worldDt);
@@ -972,6 +1027,7 @@ class InkSession {
     _segments = _buildGroundSegments()..sort((a, b) => a.a.x.compareTo(b.a.x));
     _climbs = _buildClimbRuns().toList();
     _paperWalls = _buildPaperWalls();
+    _inkEntries = _buildInkEntries();
     _nearLeft = double.infinity;
     _nearRight = double.negativeInfinity;
   }
@@ -1018,11 +1074,33 @@ class InkSession {
             a = b;
             b = swap;
           }
-          segments.add(_GroundSegment(a, b, false));
+          segments.add(_GroundSegment(a, b, false, ink: line));
         }
       }
     }
     return segments;
+  }
+
+  List<_InkEntry> _buildInkEntries() {
+    final entries = <_InkEntry>[];
+    for (final line in solidLines) {
+      if (line.role != 'walk') continue;
+      for (final contour in line.contours) {
+        if (contour.length < 2) continue;
+        final points = contour.first.x <= contour.last.x
+            ? contour
+            : contour.reversed.toList();
+        final tip = points.first;
+        // A cut-off floating fragment and a protective roof are not entrances.
+        // Find contact on this remaining contour, never on an erased neighbour.
+        if (_pointContact(tip) != null || _drawingContact(points) == null) {
+          continue;
+        }
+        if (points.any((p) => p.x < tip.x - 2.4)) continue;
+        entries.add(_InkEntry(line, tip));
+      }
+    }
+    return entries;
   }
 
   List<_PaperWall> _buildPaperWalls() {
@@ -1569,12 +1647,12 @@ class InkSession {
   bool _tryAutoJump(double travel, List<_ClimbRun> climbs) {
     if (_support(_nearGround, V(x, y)) == null) return false;
     var rise = double.infinity, nearest = double.infinity;
-    void consider(double edgeX, double top) {
+    void consider(double edgeX, double top, {double limit = autoJumpHeight}) {
       final ahead = edgeX - x, height = top - y;
       if (ahead < -.001 ||
           ahead > _bodyHalfWidth + travel ||
           height <= .75 ||
-          height > autoJumpHeight + 1e-6 ||
+          height > limit + 1e-6 ||
           ahead >= nearest) {
         return;
       }
@@ -1588,6 +1666,21 @@ class InkSession {
     for (final run in climbs) {
       if (_smallEnough(run, y) && (run.points.first.y - y).abs() <= .75) {
         consider(run.points.first.x, run.points.last.y);
+      }
+    }
+    for (final entry in _inkEntries) {
+      consider(entry.point.x, entry.point.y, limit: inkEntryHeight);
+      // A player may finish the stroke while Dot already overlaps its low
+      // overhang. Recover onto that nearby surface, without reaching through
+      // a high ceiling or giving an airborne character a second jump.
+      if (entry.point.x < x) {
+        for (final floor in _nearGround) {
+          if (!identical(floor.ink, entry.line) || !floor.contains(x)) continue;
+          final top = floor.yAt(x);
+          if (top < y + dotHeight - .75) {
+            consider(x, top, limit: inkEntryHeight);
+          }
+        }
       }
     }
     if (!rise.isFinite) return false;
@@ -1645,6 +1738,24 @@ class InkSession {
   }
 
   bool _blockedAhead(double nextX, double feetY, List<_ClimbRun> climbs) {
+    // Paper contact elsewhere approves ink, but does not put its free tip
+    // under the feet. Keep the body outside that path until the hop clears it.
+    // Once supported by the path, its normal walkable slopes remain traversable.
+    final support = _inkEntries.isEmpty
+        ? null
+        : _support(_nearGround, V(x, feetY));
+    for (final entry in _inkEntries) {
+      if (identical(support?.ink, entry.line)) continue;
+      for (final floor in _nearGround) {
+        if (!identical(floor.ink, entry.line)) continue;
+        final left = math.max(x, floor.a.x);
+        final right = math.min(nextX + _bodyHalfWidth, floor.b.x);
+        if (left > right) continue;
+        final low = math.min(floor.yAt(left), floor.yAt(right));
+        final high = math.max(floor.yAt(left), floor.yAt(right));
+        if (high > feetY + .75 && low < feetY + dotHeight) return true;
+      }
+    }
     // Sweep Dot's body against walls and slopes he cannot climb. Overhead
     // roofs stay clear, and vertical strokes never become infinite slopes.
     for (final run in climbs) {
@@ -1938,8 +2049,8 @@ class InkSession {
     'draft': draft == null
         ? null
         : {
-            'surface': draft!.start.surface.id,
-            'start': draft!.start.point.toJson(),
+            'surface': draft!.start?.surface.id,
+            'start': (draft!.start?.point ?? draft!.points.first).toJson(),
             'points': draft!.points.map((p) => p.toJson()).toList(),
             'backwards': draft!.backwards,
             'rawPoint': draft!.rawPoint.toJson(),
@@ -2072,17 +2183,15 @@ class InkSession {
         ...s.level.terrain,
         ...s.level.anchors,
       ].where((z) => z.id == a['surface']).firstOrNull;
-      if (surface != null) {
-        s.draft =
-            Draft(
-                Anchor(V.from(a['start']), surface),
-                (a['points'] as List).map(V.from).toList(),
-              )
-              ..backwards = a['backwards'] == true
-              ..rawPoint = a['rawPoint'] == null
-                  ? V.from((a['points'] as List).last)
-                  : V.from(a['rawPoint']);
-      }
+      s.draft =
+          Draft(
+              surface == null ? null : Anchor(V.from(a['start']), surface),
+              (a['points'] as List).map(V.from).toList(),
+            )
+            ..backwards = a['backwards'] == true
+            ..rawPoint = a['rawPoint'] == null
+                ? V.from((a['points'] as List).last)
+                : V.from(a['rawPoint']);
     }
     if (m['phase'] == Phase.dead.name) {
       // A persisted death can never restore the live pre-death world.

@@ -1,15 +1,17 @@
 part of '../ink_game.dart';
 
+final _surfOutline = Path()
+  ..moveTo(-17, -1.4)
+  ..cubicTo(-11, -.1, 7, .2, 18, -4.2)
+  ..cubicTo(17, -.4, 11, 2.4, 1, 2.5)
+  ..cubicTo(-9, 2.9, -15, 1.7, -17, -1.4)
+  ..close();
+
 extension _SurfPainting on InkGame {
   /// A paper-white surf sketch with an ink rim, raised nose and centre stroke.
   /// Local y=0 is the supporting ink, and Dot's existing feet rest on the deck.
   void _drawSurfBoard(Canvas c, {double alpha = 1, double drawn = 1}) {
-    final outline = Path()
-      ..moveTo(-17, -1.4)
-      ..cubicTo(-11, -.1, 7, .2, 18, -4.2)
-      ..cubicTo(17, -.4, 11, 2.4, 1, 2.5)
-      ..cubicTo(-9, 2.9, -15, 1.7, -17, -1.4)
-      ..close();
+    final outline = _surfOutline;
     c.drawPath(
       outline,
       Paint()..color = Color.fromRGBO(246, 239, 219, .94 * alpha * drawn),
@@ -20,8 +22,12 @@ extension _SurfPainting on InkGame {
       ..strokeJoin = StrokeJoin.round
       ..strokeWidth = 1.15
       ..color = Color.fromRGBO(55, 49, 39, alpha);
-    for (final metric in outline.computeMetrics()) {
-      c.drawPath(metric.extractPath(0, metric.length * drawn), pen);
+    if (drawn >= 1) {
+      c.drawPath(outline, pen);
+    } else {
+      for (final metric in outline.computeMetrics()) {
+        c.drawPath(metric.extractPath(0, metric.length * drawn), pen);
+      }
     }
     if (drawn > .6) {
       c.drawPath(

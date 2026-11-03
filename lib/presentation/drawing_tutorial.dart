@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../l10n/ink_strings.dart';
 
 /// Contextual controls stay above the route; the drawing surface remains live.
@@ -19,13 +20,13 @@ class InkDrawingTutorial extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = InkStrings.of(context);
     const titles = [
-      'Kâğıt kenarından başla',
+      'Çizgiyi kâğıda değdir',
       'Yolunu çiz ve bırak',
       'Mürekkebini tanı',
     ];
     final descriptions = [
-      'İşaretli sabit kenara dokun. Bu ilk denemede Dot seni bekliyor.',
-      'Parmağını sürükleyip bırak. Bitiş serbest; Dot’un yürüyebileceği bir yol çiz.',
+      'İstediğin yerden çiz. Çizginin bir kısmı kâğıda değsin; Dot seni bekliyor.',
+      'Parmağını sürükleyip bırak. Kâğıda değen bir yol çiz; iki ucun da serbest kalabilir.',
       'Çizginin uzunluğu kadar mürekkep harcanır. Kâğıtta yürürken dolar. Hatalı çizim harcamaz.',
     ];
     return Semantics(
@@ -91,7 +92,7 @@ class InkTutorialAnchor extends StatelessWidget {
     child: Semantics(
       label: InkStrings.of(
         context,
-      ).t('Çizime bu sabit kâğıt kenarından başla.'),
+      ).t('Çizginin herhangi bir kısmını bu kâğıda değdir.'),
       child: SizedBox(
         key: const ValueKey('ink-tutorial-anchor'),
         width: 34,

@@ -133,6 +133,44 @@ class _CourseMap extends CustomPainter {
         }
       }
     }
+    for (final bed in level.spikes) {
+      for (final triangle in bed.teeth) {
+        final shape = Path()..addPolygon(triangle.map(at).toList(), true);
+        canvas.drawPath(shape, Paint()..color = const Color(0xff78513c));
+      }
+    }
+    for (final saw in level.wallSaws) {
+      final center = at(saw.centerAt(saw.period * .72 - saw.offset));
+      final wall = at(saw.mount);
+      canvas.drawLine(
+        wall,
+        center,
+        pen
+          ..color = const Color(0xff9a805e)
+          ..strokeWidth = 1,
+      );
+      canvas.drawCircle(
+        center,
+        saw.radius * scale,
+        Paint()..color = const Color(0xff9b7851),
+      );
+      canvas.drawCircle(
+        center,
+        saw.radius * scale * .38,
+        Paint()..color = const Color(0xffe8ddc6),
+      );
+      for (var i = 0; i < 8; i++) {
+        final a = i * math.pi / 4;
+        final d = Offset(math.cos(a), math.sin(a));
+        canvas.drawLine(
+          center + d * saw.radius * scale * .75,
+          center + d * saw.radius * scale * 1.13,
+          pen
+            ..color = const Color(0xff694a34)
+            ..strokeWidth = .8,
+        );
+      }
+    }
     for (final hazard in level.hazards) {
       final box = Rect.fromPoints(
         at(V(hazard[0], hazard[1])),

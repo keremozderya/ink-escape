@@ -1,13 +1,10 @@
 # Mekanik test alanı ve köşe teması
 
-Temel: `e175eef` + `ink_escape_mekanik_test_alani.patch` +
-`ink_escape_kaydirak_takilma_duzeltmesi.patch` +
-`ink_escape_tum_mekanikler_ve_kose_temasi.patch` +
-`ink_escape_dugmeli_kagit_katlama_ve_makarali_kopru.patch` +
-`ink_escape_2d_katlama_catlama_ve_test_menusu.patch`.
-Bu sürüm son 2D katlama / beş sütunlu test menüsü yamasının üzerine uygulanır.
+Temel: GitHub `f45a018` + `ink_escape_surf_titreme_ve_serbest_cizim.patch` +
+`ink_escape_serbest_cizgi_govde_temasi_duzeltmesi.patch`.
+Bu yama son serbest çizgi / gövde teması düzeltmesinin üzerine uygulanır.
 
-Ana menü → Test Alanı → parkur → Parkuru aç. Toplam **34 parkur** vardır.
+Ana menü → Test Alanı → parkur → Parkuru aç. Toplam **36 parkur** vardır.
 Bölümler her sırada **beş kutucuk** olarak aşağı kaydırılır. Her kutucukta
 sabit bölüm numarası, başlık ve o parkurun gerçek zemin/örnek rota/engel
 verisinden çizilmiş küçük haritası vardır. Görseller yalnız görünür kartlar
@@ -17,6 +14,88 @@ sayfanın başına dönülür, bölüm numaraları değişmez; tam ipucu uzun ba
 Başlangıçta Dot bekler. Örnek çizgi düğmesi yalnız kesik kılavuzu gösterir;
 kendiliğinden çizgi üretmez, mürekkep veya çizgi yuvası kullanmaz.
 Çizgini hazırla ve Dot’u yürüt. Beklet, yardım ve yeniden dene kullanılabilir.
+
+## Serbest başlangıç ve kâğıt teması
+
+Çizim herhangi bir noktadan başlayabilir. Onay bırakma anında verilir: çizginin
+başının, sonunun veya aradaki herhangi bir parçasının gerçek kâğıt yüzeyine
+değmesi yeterlidir. İki uç da havada kalabilir. Kalem örnekleri arasındaki
+kesişimler de denetlenir; yalnız kayıtlı noktalar kontrol edilmez. Görünür
+mürekkep kenarı için 2,1 dünya birimlik temas payı kullanılır ve temas noktası
+kâğıda oturtulur. İçerideki keskin bir temas yumuşatılırken kaybolmaz.
+Önizleme, çarpışma ve ücretlendirilen çizgi aynı noktaları kullanır.
+
+Kâğıda hiç değmeyen çizim bırakıldığında uyarıyla reddedilir; mürekkep ve yuva
+harcanmaz. Başka bir mürekkep çizgisine değmek kâğıt desteği sayılmaz. 12–220
+birim uzunluk, gerçek mürekkep maliyeti ve iki etkin çizgi sınırı korunur.
+Çatı/oluk türü gerçek temas yüzeyinden belirlenir. Katlama, çizimin kâğıttaki
+parçalarını yine dönüştürür. Havadaki yarım taslak duraklatılıp kaydedilebilir;
+devam ederken son noktasına dokunularak tamamlanır. İlk dersin metinleri ve
+12 dilin karakter alt kümeleri yeni kurala göre güncellenmiştir.
+
+### Serbest ucun gövde ve ayak teması
+
+Havada başlayan, platforma ortasından değen alçalan çizgi önceki sürümde
+onaylanıyordu; yürüyüş yalnız ayak desteğini aradığı için Dot platformda
+ilerlerken çizginin alçak girişini gövdesinin içinden geçirebiliyordu. Bu durum
+normal ve ters çizimle yeniden üretildi.
+
+Güncel geometri önbelleği, yürünebilir çizgilerin kâğıda hâlâ bağlı kalan
+konturlarındaki serbest girişleri de tutar. Dot yaklaşırken, serbest uç mevcut
+ayak yüksekliğinin en fazla 36 dünya birimi üzerindeyse kısa otomatik sıçrama
+ile çıkar. Yandan gövde teması yükseliş bitene kadar ilerlemeyi sınırlar;
+ayaklar çizgiye basınca aynı kontur yürüyüş zemini olur. Zemine tekrar
+kavuştuğunda gerideki alçalan parça Dot’u durdurmaz. Ulaşılamayan alçak bir
+engel gövdeyi geçirip ışınlamak yerine mevcut takılma kuralını kullanır.
+
+Çizim zaten yürüyen Dot’un gövdesi üzerinde tamamlanmışsa, yakın alçak parçaya
+aynı sıçrama ile toparlanır. Havadayken ikinci sıçrama verilmez. Üst çatı rolü
+ve kâğıttan kopmuş parçalar bu giriş yardımına girmez. Silme, emeklilik ve
+katlama geometri önbelleğini yeniler. Sıçrama mevcut konum/hız kayıtlarıyla
+duraklatılıp sürdürülebilir.
+
+## Dikenli kâğıt ve duvardaki döner bıçak
+
+Ana menü → Test Alanı → Yeni engeller içinde **Dikenli zemin** ve
+**Duvardaki döner bıçak** kartları bulunur. İkisinin de gerçek engelleri gösteren
+küçük haritası, örnek çizgisi, Beklet kontrolü ve yeniden denemesi vardır.
+Kampanya bölüm verisi değiştirilmez; aynı engeller normal bölüm verisinde de
+kullanılabilen `Level` modelleridir.
+
+- Dikenler platformun üstündeki iki ayrı şerittir. Dişler ufak yükseklik/açı
+  farkları ve taramalarla mürekkep çizimine benzer. Çizilen üçgenler aynı zamanda
+  temas geometrisidir. Üzerlerine basmak öldürür; yalnız onaylanmış bir çizgi
+  bulunması koruma sağlamaz. Ayakları dişlerin üstünde tutacak bir kemer gerekir.
+- Döner bıçak gerçek kâğıt bankının dik yüzündeki yuvadan çıkar. Gizli → işaret →
+  çıkış → açık → geri çekiliş sırasını izler. Varsayılan döngü 5,6 saniyedir;
+  kısa sıcak renkli mürekkep işaretleri çıkışı haber verir. Dişler kâğıdın
+  arkasında çizilmez ve bıçak tamamen gizliyken temas vermez.
+- Bıçağın üstünden geçen yüksek çizgi her fazda güvenlidir. Daha az mürekkepli
+  alçak rampa zamanlamayla da geçilebilir: testte başlangıçtaki iki saniyelik
+  bekleme bu rotayı geçirirken beklemeden geçiş bıçağa çarpar.
+- Temas yalnız kare sonuna bakmaz: dikenlerde süpürülen gövde/üçgen testi,
+  bıçakta gövde ile hareketli kesici çemberin göreli hareketi kullanılır. Böylece
+  hızlı kayış ve bekleyen Dot’a yaklaşan bıçak atlanmaz. Fizik gövdesi mevcut
+  24×32 dünya birimlik sınırları kullanır.
+- Bıçak konumu ve dönüşü `gameTime` ile hesaplanır. Duraklatma her ikisini
+  dondurur, yeniden deneme başlangıca alır; normal bölüm kaydı aynı fazı yükler.
+  Test alanındaki Beklet ise Dot’u bekletir, çevrenin döngüsü devam eder.
+
+Bölümün kökünde veya bir hücrede isteğe bağlı alanlar kullanılabilir. Hücrede
+x koordinatlarına `offset_x` eklenir; `offset` ise bıçağın saniye cinsinden
+faz farkıdır. Bıçak yuvası gerçek bir dik kâğıt yüzüne yerleştirilmelidir:
+
+```json
+{
+  "spikes": [{"id": "spikes-a", "left": 175, "right": 215, "y": 0}],
+  "wallSaws": [{"id": "saw-a", "mount": [300, 32], "direction": -1,
+    "radius": 16, "reach": 34, "period": 5.6, "offset": 0}]
+}
+```
+
+`direction: -1` sola, `1` sağa açılır. Eski bölüm dosyalarında bu alanlar
+olmadığında engel üretilmez. Ölüm açıklamaları 12 dilde paketlidir; yeni
+karakterler için yazı tipi alt kümeleri de güncellenmiştir.
 
 ## PDF ile eşleştirme
 
@@ -61,7 +140,7 @@ Beklet ile hazırlanabilirsin. Q/Y/Z’de bilye yakalanınca oluğun yuvası bo�
 J’de ilk kemer adada geride kalınca emekli olur. Üç iş aynı anda üç çizgi
 anlamına gelmez. İki çizgi, 220 birim tek çizgi ve 240 depo sınırları korunur.
 
-## Çizim ve çevre için 12 deney
+## Çizim ve çevre için 14 deney
 
 - Çizim tepkileri: Kaydırak ve hız, Rampa ve sıçrama, İniş yolunu çiz, Alçak çıkış.
 - Yeni engeller: Gezinen silgi, Düğmeli katlanan kâğıt, Katın arkasındaki mürekkep,
@@ -92,7 +171,11 @@ tekrar üretmez. Silgi temasında küçük mürekkep kırıntıları görünür.
 
 Dik çizgiye atlayış tamamlanınca Dot’un iki ayağının altında ufak, kâğıt
 renginde içi ve mürekkep kenarı olan bir surf tahtası çizilir. Tahta ve
-ayaklar çizginin aynı teğetine hizalanır; bacak boyları değişmez. Kayışın her
+ayaklar aynı dönüşümü paylaşır; bacak boyları değişmez. Görsel açı, tahtanın
+altındaki 20 dünya birimlik konturdan örneklenir ve en kısa yönde, kare hızından
+bağımsız olarak yumuşatılır. Küçük kalem kırıkları tahtayı aniden çevirmez.
+Fizik, hız ve sıçrama hesabı özgün çizginin gerçek teğetini kullanır. Tamamlanan
+tahta konturu önbellektedir; her karede yeniden ölçülmez. Kayışın her
 7 dünya biriminde iki küçük mürekkep zerresi geriye savrulur; yoğunluk kare
 hızına değil gerçek mesafeye bağlıdır ve en fazla 32 zerre saklanır.
 
@@ -120,7 +203,7 @@ hareket ettirmez. Basıldıktan sonra 0,95 saniyede yumuşakça hedef kata geçe
   tarafta kaldığından görünmez ve yürünebilir destek olmaktan çıkar.
 - **Makaralı köprü:** Önceki inip kalkan menteşeli köprü ayrı parkurdur.
   İp, iki makara ve karşı ağırlık hareketin kaynağını gösterir. Üzerindeki
-  ayağı taşır; çizime sabit kıyılardan başlanır.
+  ayağı taşır. Çizginin bu platforma temas etmesi de onay için yeterlidir.
 
 Referans: Paper Fold’un Google Play mağaza görsellerindeki içeri kapanan
 kâğıt kenarları (https://play.google.com/store/apps/details?id=com.game.foldpuzzle).
@@ -191,9 +274,24 @@ bırakılmamışsa Beklet hazırlık süresini korur. Silgi ve çevre hareket et
 sürdürebilir. Yeniden dene deney durumunu baştan kurar.
 
 Flutter 3.47.9 / Dart 3.13.7, Linux x64:
-**454 test**, temiz analiz ve **5 mevcut referans rota**.
+**505 test**, temiz analiz ve **5 mevcut referans rota**.
 
-- 34 parkur gerçek begin/move/end API’si ile 30/60/120 FPS’te tamamlanır.
+- İki yeni parkur 30/60/120 FPS’te tamamlanır. Çizgisiz diken ölümü, alçak
+  çizginin korunmaması, güvenli kemer, bıçağın fazları, gizliyken güvenlik,
+  hızlı/geçişli temas, yüksek rota, zamanlanmış alçak rota, pause/retry,
+  kayıt yükleme, iki duvar yönü ve hücre ofsetleri sınanır. İki ekran boyutunda
+  yeni kartlar açılır ve gerçek pointer ile çizilen çözümler oynanır.
+- Serbest başlangıç, son/orta temas, seyrek örnekler arasında kesişim, ters/dikey
+  çizim, sivri V temasının korunması, temassız ret, maliyet/yuva sınırları ve
+  yarım taslağın kayıt sonrası devamı sınanır. Gerçek pointer ile iki ucu açık
+  çizim tamamlanır; önizleme ile ücretlendirilen kontur karşılaştırılır.
+- Görseldeki serbest alçalan giriş normal/ters gerçek çizimle 30/60/120 FPS’te
+  sınanır. Gövde içinden geçmeme, çizgi üstünde yürüyüş ve zemine dönüş,
+  hareket sırasında biten çizim, ulaşılamayan uç, silinen temas ve sıçramanın
+  kayıttan devamı denetlenir. Gerçek InkGame render yolu da kontrol edilir.
+- Tahta açısı 30/60/120 FPS’te ve ±π geçişinde sınanır. Pürüzlü bir raydaki
+  görsel açı değişiminin tek segmentlik teğete göre azalması doğrulanır.
+- 36 parkur gerçek begin/move/end API’si ile 30/60/120 FPS’te tamamlanır.
 - Her PDF parkurunda gerekli çizimlerden her biri tek tek atlanarak
   başarısızlık doğrulanır. A/F/J kaynak ve Q/Y/Z/J yuva devri ayrıca sınanır.
 - 30/73/144 FPS’te 0,2–3,5 birim düşük köşe temasları, hızlı düşüş, gerçek

@@ -1,5 +1,5 @@
 {
-  "retrieved": "2026-10-29",
+  "retrieved": "2026-11-03",
   "generation_script": "scripts/subset_localization_fonts.py",
   "fonts": [
     {
@@ -9,8 +9,8 @@
       "license_file": "assets/fonts/InkArabic-OFL.txt",
       "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansarabic/NotoSansArabic%5Bwdth%2Cwght%5D.ttf",
       "source_sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e",
-      "subset_sha256": "0167d24c5a4ca9c2b9acb174aeba4fc7bb0d6611921ea717d03ad36e708f2640",
-      "subset_bytes": 30364
+      "subset_sha256": "acbf365055c579dfdbf45a038a1d136227398787af5378d6643546ec0a570f6e",
+      "subset_bytes": 30328
     },
     {
       "family": "InkSC",
@@ -19,8 +19,8 @@
       "license_file": "assets/fonts/InkSC-OFL.txt",
       "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
       "source_sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
-      "subset_sha256": "3b857f22378b7113d264f083fa7dbda58725fcfba75830b6cb735f5b0f666c1e",
-      "subset_bytes": 234444
+      "subset_sha256": "cb51393078363532be1f1675f4c942890a26ec5c1a0a19a189093b28f61610b0",
+      "subset_bytes": 236768
     },
     {
       "family": "InkJP",
@@ -29,8 +29,8 @@
       "license_file": "assets/fonts/InkJP-OFL.txt",
       "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
       "source_sha256": "c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f",
-      "subset_sha256": "23d6daa8c429bb0f0400bd7a244a601bf8d3e2488dd4548e368472fba648280b",
-      "subset_bytes": 220496
+      "subset_sha256": "13bcd18e146bc6ac73993d83b948a7398bd84e3b56f780b4baf45bb70a7e68b4",
+      "subset_bytes": 222596
     },
     {
       "family": "InkKR",
@@ -39,8 +39,8 @@
       "license_file": "assets/fonts/InkKR-OFL.txt",
       "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf",
       "source_sha256": "194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252",
-      "subset_sha256": "d5e0c77156ef8c0bb2755e65cc8ef01b00110bb804b4ba9934a41059ba79d454",
-      "subset_bytes": 249952
+      "subset_sha256": "3f93eae62285a554e4e49e552ec5bca46b2430f1c3529352afef45f8657da6b7",
+      "subset_bytes": 252264
     }
   ]
 }

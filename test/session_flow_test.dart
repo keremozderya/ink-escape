@@ -62,7 +62,7 @@ void main() {
       expect(openingShots.fold(0, (sum, shot) => sum + shot.seconds), 37);
       await tester.tap(find.text('Hikâyeyi atla'));
       await tester.pump();
-      expect(find.text('1 / 3 · Kâğıt kenarından başla'), findsOneWidget);
+      expect(find.text('1 / 3 · Çizgiyi kâğıda değdir'), findsOneWidget);
       final x = s.x, ink = s.ink, time = s.activeTotal;
       state.game.update(20);
       await tester.pump();
@@ -173,7 +173,7 @@ void main() {
         );
         await tester.tap(find.text('Yolculuğa başla'));
         await tester.pump();
-        expect(find.text('1 / 3 · Kâğıt kenarından başla'), findsOneWidget);
+        expect(find.text('1 / 3 · Çizgiyi kâğıda değdir'), findsOneWidget);
         Offset screen(V p) => state.game.point(p) * state.game.scale;
         final pen = await tester.startGesture(screen(const V(320, 0)));
         await tester.pump();

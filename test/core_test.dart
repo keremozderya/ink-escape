@@ -70,7 +70,7 @@ void main() {
       expect(s.phase, Phase.ready);
     },
   );
-  test('Release charges actual length; only the start needs paper support', () {
+  test('Release charges actual length; a paper contact supports the stroke', () {
     final s = game();
     expect(s.beginStroke(const V(320, 0)), isTrue);
     s.moveStroke(const V(356, 3));
@@ -90,7 +90,10 @@ void main() {
     expect(free.lines.single.points.first.toJson(), [320.0, 0.0]);
     expect(free.lines.single.points.last.toJson(), [350.0, 18.0]);
     final bad = game();
-    expect(bad.beginStroke(const V(350, 100)), isFalse);
+    expect(bad.beginStroke(const V(350, 100)), isTrue);
+    bad.moveStroke(const V(400, 100));
+    expect(bad.endStroke(), isFalse);
+    expect(bad.ink, 180);
     bad.ink = 10;
     expect(draw(bad, [const V(320, 0), const V(392, 0)]), isFalse);
     expect(bad.ink, 10);

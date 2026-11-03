@@ -1,7 +1,9 @@
 import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ink_escape/core/ink_model.dart';
 import 'package:ink_escape/presentation/ink_surf.dart';
+
 import 'mechanics_lab_test.dart' show prepareLab, runLab;
 
 InkSession slidingRamp() {
@@ -13,6 +15,59 @@ InkSession slidingRamp() {
 }
 
 void main() {
+  test(
+    'Visual rotation is frame-rate independent and takes the shortest turn',
+    () {
+      for (final fps in [30, 60, 120]) {
+        final surf = InkSurfAnimation()..begin(0, angle: -1);
+        for (var i = 0; i < fps; i++) {
+          surf.follow(.7, 1 / fps);
+        }
+        expect(surf.rideAngle, closeTo(.7 + (-1 - .7) * math.exp(-18), 1e-10));
+      }
+      final surf = InkSurfAnimation()..begin(0, angle: math.pi - .02);
+      surf.follow(-math.pi + .02, 1 / 60);
+      expect(surf.rideAngle, inExclusiveRange(math.pi - .02, math.pi + .02));
+      final angle = surf.rideAngle;
+      surf.follow(0, 0);
+      expect(surf.rideAngle, angle);
+      surf.reset();
+      expect(surf.rideAngle, 0);
+    },
+  );
+
+  test(
+    'A rough rail has a steadier board tangent while physical motion is unchanged',
+    () {
+      final s = InkLabCase.byId('slide').createSession()..start();
+      final rough = <V>[const V(130, 0)];
+      for (var i = 1; i <= 34; i++) {
+        rough.add(V(130 + i * 3.0, -i * 5.8 + (i.isEven ? .6 : -.6)));
+      }
+      rough.add(const V(275, -197.2));
+      // Deliberately retain dense, uneven geometry to expose segment-angle jumps.
+      s.lines.add(InkLine('rough', rough));
+      s.mechanics!.holdDot = false;
+      double? previousRail, previousBoard;
+      var railChange = 0.0, boardChange = 0.0, samples = 0;
+      for (var i = 0; i < 1200 && s.phase == Phase.playing; i++) {
+        s.advance(1 / 120);
+        final lab = s.mechanics!;
+        if (!lab.sliding || s.x < 145 || s.x > 219) continue;
+        if (previousRail != null) {
+          railChange += (lab.railAngle - previousRail).abs();
+          boardChange += (lab.surfAngle - previousBoard!).abs();
+        }
+        previousRail = lab.railAngle;
+        previousBoard = lab.surfAngle;
+        samples++;
+      }
+      expect(samples, greaterThan(20));
+      expect(railChange, greaterThan(.5));
+      expect(boardChange, lessThan(railChange * .35));
+    },
+  );
+
   test(
     'The departing sketch travels eight degrees away from Dot and fades completely',
     () {

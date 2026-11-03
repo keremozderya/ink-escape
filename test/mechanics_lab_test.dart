@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ink_escape/core/ink_model.dart';
 
@@ -223,11 +224,16 @@ void main() {
       expect(s.y, closeTo(s.mechanics!.pulleyDeck!.yAt(s.x), .001));
     },
   );
-  test('Ink starts on fixed paper instead of a moving pulley deck', () {
-    final s = InkLabCase.byId('pulley').createSession()..start();
-    expect(s.beginStroke(s.mechanics!.pulleyDeck!.b), isFalse);
-    expect(s.beginStroke(const V(160, 0)), isTrue);
-  });
+  test(
+    'Ink may touch a moving pulley deck instead of starting on fixed paper',
+    () {
+      final s = InkLabCase.byId('pulley').createSession()..start();
+      final edge = s.mechanics!.pulleyDeck!.b;
+      expect(s.beginStroke(edge + const V(30, 30)), isTrue);
+      s.moveStroke(edge);
+      expect(s.endStroke(), isTrue, reason: s.message);
+    },
+  );
   test(
     'A failed case lookup is explicit and existing story sessions use normal rules',
     () {

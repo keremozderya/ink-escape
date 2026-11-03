@@ -104,6 +104,20 @@ class InkLabCase {
       'Join the two brass pins with ink. The mechanism unfolds the paper bridge below.',
     ),
     ..._planLabCases,
+    InkLabCase(
+      'spikes',
+      'Dikenli zemin',
+      'Spiked paper',
+      'Dikenlerin üzerinden geçen bir kemer çiz. Yalnız kâğıda değmesi yetmez; ayaklarına da açıklık bırak.',
+      'Arch over the spikes. Paper contact approves the ink, but leave clearance under Dot’s feet.',
+    ),
+    InkLabCase(
+      'wall-saw',
+      'Duvardaki döner bıçak',
+      'Retracting wall saw',
+      'Bıçak işaret verdikten sonra duvardan çıkar. Yüksek bir yol çiz ya da alçak rampayı bıçak gizliyken geç.',
+      'The wall signals before the blade emerges. Draw a high route or time a lower ramp while it is hidden.',
+    ),
   ];
   static InkLabCase byId(String id) => all.firstWhere((c) => c.id == id);
   String title(String language) => language == 'tr' ? tr : en;
@@ -265,6 +279,16 @@ class MechanicsLab {
   }
 
   double get railAngle => _points.length < 2 ? 0 : _sample(_distance).$2;
+
+  /// A board spans multiple pen segments. Averaging over its footprint avoids
+  /// reacting to every small kink; physics keeps the exact rail tangent.
+  double get surfAngle {
+    if (_points.length < 2) return 0;
+    final a = _sample(math.max(0, _distance - 10)).$1;
+    final b = _sample(math.min(_lengths.last, _distance + 10)).$1;
+    return a.distance(b) < 1e-7 ? railAngle : math.atan2(b.y - a.y, b.x - a.x);
+  }
+
   void cycleGuide() {
     if (!showGuide) {
       showGuide = true;
@@ -328,6 +352,26 @@ class MechanicsLab {
     s.ink = s.entryInk = 240;
     if (spec.family != null) {
       _preparePlan();
+      return;
+    }
+    if (spec.id == 'spikes') {
+      _floor('lab-ground', -160, 0, 730, 0);
+      s.level.spikes.addAll([
+        InkSpikeBed('lab-spikes-a', 175, 215),
+        InkSpikeBed('lab-spikes-b', 245, 285),
+      ]);
+      guides.add([
+        [const V(140, 0), const V(166, 32), const V(292, 32), const V(320, 0)],
+      ]);
+      return;
+    }
+    if (spec.id == 'wall-saw') {
+      _floor('lab-start', -160, 0, 160, 0);
+      _floor('lab-wall', 300, 60, 730, 60);
+      s.level.wallSaws.add(InkWallSaw('lab-saw', const V(300, 32)));
+      guides.add([
+        [const V(160, 0), const V(210, 50), const V(255, 66), const V(300, 60)],
+      ]);
       return;
     }
     if (spec.id == 'fold' || spec.id == 'fold-cover') {

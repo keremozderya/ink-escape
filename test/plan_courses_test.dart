@@ -8,7 +8,7 @@ void main() {
     'Every plan family has a separate playable case; ledge pulling is replaced',
     () {
       final plan = InkLabCase.all.where((c) => c.family != null).toList();
-      expect(InkLabCase.all, hasLength(34));
+      expect(InkLabCase.all, hasLength(36));
       expect(plan.map((c) => c.family).toSet(), {
         'G',
         'R',

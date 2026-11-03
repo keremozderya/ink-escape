@@ -13,6 +13,7 @@ import 'l10n/ink_strings.dart';
 
 part 'presentation/mechanics_lab_painter.dart';
 part 'presentation/ink_surf_painter.dart';
+part 'presentation/ink_obstacles_painter.dart';
 
 class InkGame extends FlameGame {
   InkGame(
@@ -105,6 +106,9 @@ class InkGame extends FlameGame {
     _origin = session.origin;
     _labVertical = _labVerticalTarget;
     surf.reset();
+    if (session.mechanics?.sliding == true) {
+      surf.begin(session.gameTime, angle: session.mechanics!.surfAngle);
+    }
     _cacheNext();
     if (session.level.gates.any((g) => g.open)) {
       _gateAt = -1;
@@ -181,7 +185,9 @@ class InkGame extends FlameGame {
   void effect(String name, V at) {
     onEffect?.call(name);
     if (name == 'land') _landAt = visualTime;
-    if (name == 'slideStart') surf.begin(session.gameTime);
+    if (name == 'slideStart') {
+      surf.begin(session.gameTime, angle: session.mechanics!.surfAngle);
+    }
     if (name == 'slideDust') {
       surf.friction(at, session.mechanics!.railAngle, session.gameTime);
     }
@@ -288,6 +294,7 @@ class InkGame extends FlameGame {
       // coordinates must not shift while the player prepares the descent.
       final vertical = _labVerticalTarget;
       _labVertical += (vertical - _labVertical) * (1 - math.exp(-12 * step));
+      if (lab?.sliding == true) surf.follow(lab!.surfAngle, step);
       surf.prune(session.gameTime);
       for (final p in particles) {
         p.age += step;
@@ -360,12 +367,14 @@ class InkGame extends FlameGame {
       _terrain(canvas, s);
     }
     _drawFoldPage(canvas);
+    _drawLevelObstacles(canvas, session.level);
     final next = _nextLevel;
     if (next != null) {
       for (final surface in _nextTerrain) {
         if (surface.a.x > cameraX + visibleWidth + 40) continue;
         if (surface.b.x >= cameraX - 40) _terrain(canvas, surface);
       }
+      _drawLevelObstacles(canvas, next, offsetX: session.level.width);
       for (final p in next.pickups) {
         _prop(
           canvas,
@@ -537,8 +546,8 @@ class InkGame extends FlameGame {
           continue;
         }
         for (final v in [a.a, a.b]) {
-          if (v.x <= draft.start.point.x + 10 ||
-              v.x - draft.start.point.x > 220) {
+          if (v.distance(draft.points.first) <= 10 ||
+              (v.x - draft.points.first.x).abs() > 220) {
             continue;
           }
           canvas.drawCircle(
@@ -937,7 +946,7 @@ class InkGame extends FlameGame {
     c.save();
     c.translate(q.dx, q.dy);
     if (sliding) {
-      c.rotate(-session.mechanics!.railAngle);
+      c.rotate(-surf.rideAngle);
       final drawn = surf.drawProgress(session.gameTime);
       _drawSurfBoard(c, drawn: drawn);
       c.translate(0, -1.8 * drawn);

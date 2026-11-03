@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+
 import '../core/ink_model.dart';
 
 /// Small presentation records sampled against game time. Pausing therefore
@@ -6,11 +7,25 @@ import '../core/ink_model.dart';
 class InkSurfAnimation {
   double? _started;
   int _seed = 0;
+  double rideAngle = 0;
   final List<InkSurfFlight> flights = [];
   final List<InkSurfDust> dust = [];
   static const maxDust = 32, maxFlights = 3;
 
-  void begin(double time) => _started = time;
+  void begin(double time, {double angle = 0}) {
+    _started = time;
+    rideAngle = angle;
+  }
+
+  /// Board and feet share one frame-rate independent, shortest-turn rotation.
+  void follow(double target, double dt) {
+    final delta = math.atan2(
+      math.sin(target - rideAngle),
+      math.cos(target - rideAngle),
+    );
+    rideAngle += delta * (1 - math.exp(-18 * math.max(0, dt)));
+  }
+
   double drawProgress(double time) =>
       _started == null ? 1 : ((time - _started!) / .14).clamp(0.0, 1.0);
 
@@ -47,6 +62,7 @@ class InkSurfAnimation {
   void reset() {
     _started = null;
     _seed = 0;
+    rideAngle = 0;
     flights.clear();
     dust.clear();
   }
